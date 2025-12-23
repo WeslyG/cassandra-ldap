@@ -254,12 +254,26 @@ public class DefaultLDAPServer extends LDAPUserRetriever
                 throw originalException;
             }
 
-            try (final CloseableLdapContext rootContext = openRootContext())
+            CloseableLdapContext rootContext = null;
+            try
             {
+                rootContext = openRootContext();
                 return rootContext.context.getAttributes(dn, attributes);
             } catch (final NamingException ex)
             {
                 throw originalException;
+            } finally
+            {
+                if (rootContext != null)
+                {
+                    try
+                    {
+                        rootContext.close();
+                    } catch (final Exception ex)
+                    {
+                        logger.debug("Unable to close root LDAP context", ex);
+                    }
+                }
             }
         }
 
