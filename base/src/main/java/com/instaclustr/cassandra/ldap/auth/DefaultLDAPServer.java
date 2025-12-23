@@ -20,6 +20,7 @@ package com.instaclustr.cassandra.ldap.auth;
 import static java.lang.String.format;
 
 import javax.naming.Context;
+import javax.naming.InvalidNameException;
 import javax.naming.NamingEnumeration;
 import javax.naming.NamingException;
 import javax.naming.directory.Attribute;
@@ -27,7 +28,9 @@ import javax.naming.directory.Attributes;
 import javax.naming.directory.InitialDirContext;
 import javax.naming.directory.SearchControls;
 import javax.naming.directory.SearchResult;
+import javax.naming.ldap.LdapName;
 import java.io.IOException;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Hashtable;
 import java.util.List;
@@ -59,9 +62,12 @@ public class DefaultLDAPServer extends LDAPUserRetriever
         private static final String GROUP_MEMBER_ATTRIBUTE = "member";
         private static final String GROUP_UNIQUE_MEMBER_ATTRIBUTE = "uniqueMember";
 
+        private final LdapName baseDn;
+
         public LDAPInitialContext(final Properties properties)
         {
             this.properties = properties;
+            this.baseDn = parseBaseDn(properties.getProperty(LdapAuthenticatorConfiguration.LDAP_URI_PROP));
 
             final Properties ldapProperties = new Properties();
 
@@ -176,13 +182,13 @@ public class DefaultLDAPServer extends LDAPUserRetriever
 
         private boolean isMemberOfGroup(final String userDn, final String normalizedGroupDn) throws NamingException
         {
-            final Attributes attributes = ldapContext.context.getAttributes(userDn, new String[] { MEMBER_OF_ATTRIBUTE });
+            final Attributes attributes = ldapContext.context.getAttributes(toRelativeDn(userDn), new String[] { MEMBER_OF_ATTRIBUTE });
             return attributeContainsDn(attributes.get(MEMBER_OF_ATTRIBUTE), normalizedGroupDn);
         }
 
         private boolean isUserListedInGroup(final String groupDn, final String normalizedUserDn) throws NamingException
         {
-            final Attributes attributes = ldapContext.context.getAttributes(groupDn,
+            final Attributes attributes = ldapContext.context.getAttributes(toRelativeDn(groupDn),
                                                                            new String[] { GROUP_MEMBER_ATTRIBUTE, GROUP_UNIQUE_MEMBER_ATTRIBUTE });
             if (attributeContainsDn(attributes.get(GROUP_MEMBER_ATTRIBUTE), normalizedUserDn))
             {
@@ -219,6 +225,63 @@ public class DefaultLDAPServer extends LDAPUserRetriever
             }
 
             return false;
+        }
+
+        private String toRelativeDn(final String dn)
+        {
+            if (dn == null || baseDn == null)
+            {
+                return dn;
+            }
+
+            try
+            {
+                final LdapName name = new LdapName(dn);
+                if (name.endsWith(baseDn))
+                {
+                    int prefixSize = name.size() - baseDn.size();
+                    if (prefixSize <= 0)
+                    {
+                        return "";
+                    }
+                    return name.getPrefix(prefixSize).toString();
+                }
+            } catch (final InvalidNameException ex)
+            {
+                logger.debug("Unable to parse DN {}", dn, ex);
+            }
+
+            return dn;
+        }
+
+        private LdapName parseBaseDn(final String ldapUri)
+        {
+            if (ldapUri == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                final URI uri = new URI(ldapUri);
+                final String path = uri.getPath();
+                if (path == null || path.isEmpty() || "/".equals(path))
+                {
+                    return null;
+                }
+
+                final String baseDn = path.startsWith("/") ? path.substring(1) : path;
+                if (baseDn.isEmpty())
+                {
+                    return null;
+                }
+
+                return new LdapName(baseDn);
+            } catch (final Exception ex)
+            {
+                logger.debug("Unable to parse base DN from ldap_uri {}", ldapUri, ex);
+                return null;
+            }
         }
 
         private String normalizeDn(final String dn)
