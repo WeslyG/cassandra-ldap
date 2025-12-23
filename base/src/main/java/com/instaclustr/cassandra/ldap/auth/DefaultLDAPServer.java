@@ -22,6 +22,8 @@ import static java.lang.String.format;
 import javax.naming.Context;
 import javax.naming.NamingEnumeration;
 import javax.naming.NamingException;
+import javax.naming.directory.Attribute;
+import javax.naming.directory.Attributes;
 import javax.naming.directory.InitialDirContext;
 import javax.naming.directory.SearchControls;
 import javax.naming.directory.SearchResult;
@@ -29,6 +31,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Hashtable;
 import java.util.List;
+import java.util.Locale;
 import java.util.Properties;
 
 import com.instaclustr.cassandra.ldap.User;
@@ -51,6 +54,10 @@ public class DefaultLDAPServer extends LDAPUserRetriever
 
         private CloseableLdapContext ldapContext;
         private Properties properties;
+
+        private static final String MEMBER_OF_ATTRIBUTE = "memberOf";
+        private static final String GROUP_MEMBER_ATTRIBUTE = "member";
+        private static final String GROUP_UNIQUE_MEMBER_ATTRIBUTE = "uniqueMember";
 
         public LDAPInitialContext(final Properties properties)
         {
@@ -155,6 +162,74 @@ public class DefaultLDAPServer extends LDAPUserRetriever
             }
         }
 
+        public boolean isUserInGroup(final String userDn, final String groupDn) throws NamingException
+        {
+            final String normalizedGroupDn = normalizeDn(groupDn);
+
+            if (isMemberOfGroup(userDn, normalizedGroupDn))
+            {
+                return true;
+            }
+
+            return isUserListedInGroup(groupDn, normalizeDn(userDn));
+        }
+
+        private boolean isMemberOfGroup(final String userDn, final String normalizedGroupDn) throws NamingException
+        {
+            final Attributes attributes = ldapContext.context.getAttributes(userDn, new String[] { MEMBER_OF_ATTRIBUTE });
+            return attributeContainsDn(attributes.get(MEMBER_OF_ATTRIBUTE), normalizedGroupDn);
+        }
+
+        private boolean isUserListedInGroup(final String groupDn, final String normalizedUserDn) throws NamingException
+        {
+            final Attributes attributes = ldapContext.context.getAttributes(groupDn,
+                                                                           new String[] { GROUP_MEMBER_ATTRIBUTE, GROUP_UNIQUE_MEMBER_ATTRIBUTE });
+            if (attributeContainsDn(attributes.get(GROUP_MEMBER_ATTRIBUTE), normalizedUserDn))
+            {
+                return true;
+            }
+            return attributeContainsDn(attributes.get(GROUP_UNIQUE_MEMBER_ATTRIBUTE), normalizedUserDn);
+        }
+
+        private boolean attributeContainsDn(final Attribute attribute, final String normalizedDn) throws NamingException
+        {
+            if (attribute == null)
+            {
+                return false;
+            }
+
+            NamingEnumeration<?> values = null;
+            try
+            {
+                values = attribute.getAll();
+                while (values.hasMore())
+                {
+                    final Object value = values.next();
+                    if (value != null && normalizeDn(value.toString()).equals(normalizedDn))
+                    {
+                        return true;
+                    }
+                }
+            } finally
+            {
+                if (values != null)
+                {
+                    values.close();
+                }
+            }
+
+            return false;
+        }
+
+        private String normalizeDn(final String dn)
+        {
+            if (dn == null)
+            {
+                return null;
+            }
+            return dn.trim().toLowerCase(Locale.ROOT);
+        }
+
         @Override
         public void close() throws IOException {
             if (ldapContext != null)
@@ -197,6 +272,14 @@ public class DefaultLDAPServer extends LDAPUserRetriever
             {
                 logger.debug("Logging to LDAP with {} was ok!", user);
 
+                final String requiredGroupDn = properties.getProperty(LdapAuthenticatorConfiguration.REQUIRED_GROUP_DN);
+                if (requiredGroupDn != null && !context.isUserInGroup(ldapDn, requiredGroupDn))
+                {
+                    throw new LDAPAuthFailedException(ExceptionCode.UNAUTHORIZED,
+                                                      "User " + user.getUsername() + " is not a member of required LDAP group.",
+                                                      null);
+                }
+
                 final User foundUser = new User(user.getUsername(),
                                           hasher.hashPassword(user.getPassword(),
                                                               LdapAuthenticatorConfiguration.getGensaltLog2Rounds(this.properties)));
@@ -211,6 +294,10 @@ public class DefaultLDAPServer extends LDAPUserRetriever
         }
         catch (final Exception ex)
         {
+            if (ex instanceof LDAPAuthFailedException)
+            {
+                throw (LDAPAuthFailedException) ex;
+            }
             logger.debug("Error encountered when authenticating via LDAP {}", ex.getMessage());
             throw new LDAPAuthFailedException(ExceptionCode.UNAUTHORIZED, "Not possible to login " + user.getUsername(), ex);
         }
