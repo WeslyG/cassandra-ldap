@@ -165,19 +165,19 @@ public final class LdapAuthenticatorConfiguration
             properties.setProperty(REQUIRED_GROUP_DN, trimmedGroupDn);
         }
 
-        String defaultRolesMembership = properties.getProperty(DEFAULT_ROLES_MEMBERSHIP);
-        if (defaultRolesMembership == null)
+        String defaultGrantedRoles = properties.getProperty(DEFAULT_ROLES_MEMBERSHIP);
+        if (defaultGrantedRoles == null)
         {
-            defaultRolesMembership = properties.getProperty(LEGACY_DEFAULT_ROLE_MEMBERSHIP);
+            defaultGrantedRoles = properties.getProperty(LEGACY_DEFAULT_ROLE_MEMBERSHIP);
         }
-        if (defaultRolesMembership != null)
+        if (defaultGrantedRoles != null)
         {
-            String normalizedDefaultRolesMembership = normalizeDefaultRolesMembership(defaultRolesMembership);
-            if (normalizedDefaultRolesMembership.isEmpty())
+            String normalizedDefaultGrantedRoles = normalizeDefaultGrantedRoles(defaultGrantedRoles);
+            if (normalizedDefaultGrantedRoles.isEmpty())
             {
                 throw new ConfigurationException(format("%s can not be empty when set.", DEFAULT_ROLES_MEMBERSHIP));
             }
-            properties.setProperty(DEFAULT_ROLES_MEMBERSHIP, normalizedDefaultRolesMembership);
+            properties.setProperty(DEFAULT_ROLES_MEMBERSHIP, normalizedDefaultGrantedRoles);
         }
 
         properties.put(LdapAuthenticatorConfiguration.CONTEXT_FACTORY_PROP, properties.getProperty(CONTEXT_FACTORY_PROP, DEFAULT_CONTEXT_FACTORY));
@@ -214,10 +214,10 @@ public final class LdapAuthenticatorConfiguration
         }
     }
 
-    private static String normalizeDefaultRolesMembership(final String defaultRolesMembership)
+    private static String normalizeDefaultGrantedRoles(final String defaultGrantedRoles)
     {
-        final String[] roles = defaultRolesMembership.split(",");
-        final StringBuilder normalizedRoles = new StringBuilder();
+        final String[] roles = defaultGrantedRoles.split(",");
+        final StringBuilder normalizedGrantedRoles = new StringBuilder();
 
         for (final String role : roles)
         {
@@ -227,13 +227,13 @@ public final class LdapAuthenticatorConfiguration
                 continue;
             }
 
-            if (normalizedRoles.length() > 0)
+            if (normalizedGrantedRoles.length() > 0)
             {
-                normalizedRoles.append(",");
+                normalizedGrantedRoles.append(",");
             }
-            normalizedRoles.append(trimmedRole);
+            normalizedGrantedRoles.append(trimmedRole);
         }
 
-        return normalizedRoles.toString();
+        return normalizedGrantedRoles.toString();
     }
 }

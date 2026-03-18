@@ -140,41 +140,41 @@ public class Cassandra41SystemAuthRoles implements SystemAuthRoles
         return rows.result.isEmpty();
     }
 
-    public void createRole(String roleName, boolean superUser, String defaultRoleMembership)
+    public void createRole(String userRoleName, boolean superUser, String defaultGrantedRoles)
     {
         final CreateRoleStatement createStmt = (CreateRoleStatement) QueryProcessor.getStatement(format(CREATE_ROLE_STATEMENT_WITH_LOGIN,
-                                                                                                        roleName,
+                                                                                                        userRoleName,
                                                                                                         superUser),
                                                                                                  getClientState());
 
         createStmt.execute(new QueryState(getClientState()),
-                           QueryOptions.forInternalCalls(LOCAL_ONE, singletonList(ByteBufferUtil.bytes(roleName))),
+                           QueryOptions.forInternalCalls(LOCAL_ONE, singletonList(ByteBufferUtil.bytes(userRoleName))),
                            Dispatcher.RequestTime.forImmediateExecution());
 
-        if (defaultRoleMembership != null)
+        if (defaultGrantedRoles != null)
         {
-            for (final String role : defaultRoleMembership.split(","))
+            for (final String grantedRole : defaultGrantedRoles.split(","))
             {
-                final String trimmedRole = role.trim();
-                if (trimmedRole.isEmpty())
+                final String trimmedGrantedRole = grantedRole.trim();
+                if (trimmedGrantedRole.isEmpty())
                 {
                     continue;
                 }
 
-                if (roleMissing(trimmedRole))
+                if (roleMissing(trimmedGrantedRole))
                 {
-                    logger.warn("Unable to add user to default role {} because it doesn't exist.", trimmedRole);
+                    logger.warn("Unable to add user to default role {} because it doesn't exist.", trimmedGrantedRole);
                     continue;
                 }
 
-                logger.debug("Adding user {} to default role {}", roleName, trimmedRole);
+                logger.debug("Adding user {} to default role {}", userRoleName, trimmedGrantedRole);
                 final GrantRoleStatement grantRoleStmt = (GrantRoleStatement) QueryProcessor.getStatement(format(GRANT_ROLE_STATEMENT,
-                                                                                                                 trimmedRole,
-                                                                                                                 roleName),
+                                                                                                                 trimmedGrantedRole,
+                                                                                                                 userRoleName),
                                                                                                           getClientState());
 
                 grantRoleStmt.execute(new QueryState(getClientState()),
-                                      QueryOptions.forInternalCalls(LOCAL_ONE, singletonList(ByteBufferUtil.bytes(roleName))),
+                                      QueryOptions.forInternalCalls(LOCAL_ONE, singletonList(ByteBufferUtil.bytes(userRoleName))),
                                       Dispatcher.RequestTime.forImmediateExecution());
             }
         }
