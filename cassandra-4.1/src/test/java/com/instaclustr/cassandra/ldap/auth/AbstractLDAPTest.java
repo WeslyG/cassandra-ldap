@@ -71,6 +71,7 @@ public abstract class AbstractLDAPTest {
     private static final String nonMemberUserName = "alice";
     private static final String nonMemberUserPassword = "test";
     private static final String defaultRoleName = "default_role";
+    private static final String secondDefaultRoleName = "default_role_2";
     private static final String basicQuery = "SELECT * FROM system.local;";
 
     protected void testLDAPinternal() throws Exception {
@@ -111,6 +112,13 @@ public abstract class AbstractLDAPTest {
             String.format("CREATE ROLE '%s';", defaultRoleName),
             cassandraDataCenter1
         );
+        context.simpleExecute(
+            context.firstNode,
+            cassandraAdminUser,
+            cassandraAdminPassword,
+            String.format("CREATE ROLE '%s';", secondDefaultRoleName),
+            cassandraDataCenter1
+        );
 
         // Delete the user if it already exists
         context.simpleExecute(
@@ -139,6 +147,15 @@ public abstract class AbstractLDAPTest {
                 String.format("LIST ROLES OF '%s';", testUserDn),
                 cassandraDataCenter1
             ).all().stream().anyMatch(row -> row.getString("role").equals(defaultRoleName))
+        );
+        assertTrue(
+            context.simpleExecute(
+                context.firstNode,
+                cassandraAdminUser,
+                cassandraAdminPassword,
+                String.format("LIST ROLES OF '%s';", testUserDn),
+                cassandraDataCenter1
+            ).all().stream().anyMatch(row -> row.getString("role").equals(secondDefaultRoleName))
         );
     }
 
@@ -381,6 +398,7 @@ public abstract class AbstractLDAPTest {
 
             ldapProperties.setProperty("ldap_uri", "ldap://127.0.0.1:" + ldapPort + "/dc=example,dc=org");
             ldapProperties.setProperty("required_group_dn", requiredGroupDn);
+            ldapProperties.setProperty("default_roles_membership", defaultRoleName + "," + secondDefaultRoleName);
 
             File tempFile = Files.createTempFile("ldap-test", ".properties").toFile();
             ldapProperties.store(new FileWriter(tempFile, true), "comments");

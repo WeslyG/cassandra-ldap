@@ -21,7 +21,7 @@ import static com.instaclustr.cassandra.ldap.conf.LdapAuthenticatorConfiguration
 import static com.instaclustr.cassandra.ldap.conf.LdapAuthenticatorConfiguration.ALLOW_EMPTY_PASSWORD_PROP;
 import static com.instaclustr.cassandra.ldap.conf.LdapAuthenticatorConfiguration.CASSANDRA_LDAP_ADMIN_USER;
 import static com.instaclustr.cassandra.ldap.conf.LdapAuthenticatorConfiguration.CASSANDRA_LDAP_ADMIN_USER_SYSTEM_PROPERTY;
-import static com.instaclustr.cassandra.ldap.conf.LdapAuthenticatorConfiguration.DEFAULT_ROLE_MEMBERSHIP;
+import static com.instaclustr.cassandra.ldap.conf.LdapAuthenticatorConfiguration.DEFAULT_ROLES_MEMBERSHIP;
 import static com.instaclustr.cassandra.ldap.utils.ServiceUtils.getService;
 import static java.lang.Boolean.parseBoolean;
 import static java.lang.String.format;
@@ -170,7 +170,7 @@ public class LDAPAuthenticator extends AbstractLDAPAuthenticator
                 
                 if (cachedUser.getLdapDN() != null && systemAuthRoles.roleMissing(cachedUser.getLdapDN()))
                 {
-                    systemAuthRoles.createRole(cachedUser.getLdapDN(), false, properties.getProperty(DEFAULT_ROLE_MEMBERSHIP, null));
+                    systemAuthRoles.createRole(cachedUser.getLdapDN(), false, properties.getProperty(DEFAULT_ROLES_MEMBERSHIP, null));
                 }
 
                 final String loginName = cachedUser.getLdapDN() == null ? cachedUser.getUsername() : cachedUser.getLdapDN();

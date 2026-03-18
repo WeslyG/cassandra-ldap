@@ -72,7 +72,9 @@ public final class LdapAuthenticatorConfiguration
     public static final String CONSISTENCY_FOR_ROLE = "consistency_for_role";
     public static final String DEFAULT_CONSISTENCY_FOR_ROLE = "LOCAL_ONE";
 
-    public static final String DEFAULT_ROLE_MEMBERSHIP = "default_role_membership";
+    public static final String DEFAULT_ROLES_MEMBERSHIP = "default_roles_membership";
+    public static final String LEGACY_DEFAULT_ROLE_MEMBERSHIP = "default_role_membership";
+    public static final String DEFAULT_ROLE_MEMBERSHIP = LEGACY_DEFAULT_ROLE_MEMBERSHIP;
 
     public Properties parseProperties() throws ConfigurationException
     {
@@ -163,6 +165,21 @@ public final class LdapAuthenticatorConfiguration
             properties.setProperty(REQUIRED_GROUP_DN, trimmedGroupDn);
         }
 
+        String defaultRolesMembership = properties.getProperty(DEFAULT_ROLES_MEMBERSHIP);
+        if (defaultRolesMembership == null)
+        {
+            defaultRolesMembership = properties.getProperty(LEGACY_DEFAULT_ROLE_MEMBERSHIP);
+        }
+        if (defaultRolesMembership != null)
+        {
+            String normalizedDefaultRolesMembership = normalizeDefaultRolesMembership(defaultRolesMembership);
+            if (normalizedDefaultRolesMembership.isEmpty())
+            {
+                throw new ConfigurationException(format("%s can not be empty when set.", DEFAULT_ROLES_MEMBERSHIP));
+            }
+            properties.setProperty(DEFAULT_ROLES_MEMBERSHIP, normalizedDefaultRolesMembership);
+        }
+
         properties.put(LdapAuthenticatorConfiguration.CONTEXT_FACTORY_PROP, properties.getProperty(CONTEXT_FACTORY_PROP, DEFAULT_CONTEXT_FACTORY));
         properties.put(LdapAuthenticatorConfiguration.LDAP_URI_PROP, properties.getProperty(LDAP_URI_PROP));
 
@@ -195,5 +212,28 @@ public final class LdapAuthenticatorConfiguration
             logger.warn(format("Unable to parse %s property, setting it to %s", GENSALT_LOG2_ROUNDS_PROP, GENSALT_LOG2_ROUNDS_DEFAULT));
             return GENSALT_LOG2_ROUNDS_DEFAULT;
         }
+    }
+
+    private static String normalizeDefaultRolesMembership(final String defaultRolesMembership)
+    {
+        final String[] roles = defaultRolesMembership.split(",");
+        final StringBuilder normalizedRoles = new StringBuilder();
+
+        for (final String role : roles)
+        {
+            final String trimmedRole = role.trim();
+            if (trimmedRole.isEmpty())
+            {
+                continue;
+            }
+
+            if (normalizedRoles.length() > 0)
+            {
+                normalizedRoles.append(",");
+            }
+            normalizedRoles.append(trimmedRole);
+        }
+
+        return normalizedRoles.toString();
     }
 }

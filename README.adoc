@@ -101,8 +101,8 @@ The content of the configuration file is as follows:
 |load_ldap_service
 |defaults to false, if it is true, SPI mechanism will look on class path to load custom implementation of `LDAPUserRetriever`.
 
-|default_role_membership
-|A role to add new LDAP users to by default. Defaults to empty (users will not be added to any role).
+|default_roles_membership
+|Comma-separated Cassandra roles to add new LDAP users to by default. Defaults to empty (users will not be added to any role).
 
 |cassandra_ldap_admin_user
 |name of a user/role which will be considered a default superuser, instead of `cassandra`. Please consult "How it Works" section to know more about the usage.
