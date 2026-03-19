@@ -166,11 +166,11 @@
                                         </mapper>
                                     </data>
                                     <data>
-                                        <src>${project.basedir}/../conf/ldap.properties</src>
+                                        <src>${project.basedir}/../conf/ldap.yaml</src>
                                         <type>file</type>
                                         <mapper>
                                             <type>perm</type>
-                                            <prefix>/etc/cassandra/ldap.properties</prefix>
+                                            <prefix>/etc/cassandra/ldap.yaml</prefix>
                                         </mapper>
                                     </data>
                                 </dataSet>
@@ -199,8 +199,8 @@
                                         <file>${project.build.directory}/${project.build.finalName}.jar</file>
                                     </entry>
                                     <entry>
-                                        <name>/etc/cassandra/ldap.properties</name>
-                                        <file>${project.basedir}/../conf/ldap.properties</file>
+                                        <name>/etc/cassandra/ldap.yaml</name>
+                                        <file>${project.basedir}/../conf/ldap.yaml</file>
                                     </entry>
                                 </entries>
                                 <targetDir>${outputDirectory}</targetDir>

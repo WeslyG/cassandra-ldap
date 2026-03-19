@@ -59,11 +59,11 @@ This JAR already contains artifacts from `base` so you do not need to take care 
 You may at most probably use a plugin built against a respective version for other Cassandra
 versions of the same minor release, so you might use 3.11.8 plugin for 3.11.4, for example.
 
-The configuration is ridden by a configuration file and system properties which you need to start Cassandra with
-to point that plugin to a configuration file to read properties from.
+The configuration is driven by a YAML file and system properties which you need to start Cassandra with
+to point that plugin to a configuration file.
 
-The system property is `-Dcassandra.ldap.properties.file=/path/to/configiration.properties`. If
-not set, it will try to resolve `$CASSANDRA_CONF/ldap.properties`.
+The system property is `-Dcassandra.ldap.config.file=/path/to/ldap.yaml`. If
+not set, it will try to resolve `$CASSANDRA_CONF/ldap.yaml`.
 
 The content of the configuration file is as follows:
 
@@ -74,20 +74,20 @@ The content of the configuration file is as follows:
 |ldap_uri
 |Ldap server URI. Specify ldaps when using a secure LDAP port (strongly recommended), example: `ldap://127.0.0.1:389/dc=example,dc=org`
 
-|context_factory
+|ldap_context_factory
 |defaults to `com.sun.jndi.ldap.LdapCtxFactory`
 
-|service_dn
+|ldap_service_dn
 |Service user distinguished name. This user will be a SUPERUSER and be used for looking up user details on authentication, example: `cn=admin,dc=example,dc=org`
 
-|service_password
+|ldap_service_password
 |Service user password
 
-|filter_template
+|ldap_filter_template
 |template for searching in LDAP, explanation further in this readme, defaults to `(cn=%s)`
 
-|required_group_dn
-|if set, only users who are members of this LDAP group (full DN) can log in
+|group_role_mappings
+|YAML list of LDAP group to Cassandra role mappings. A user can log in only if they match at least one configured LDAP group. The plugin grants missing Cassandra roles and revokes stale managed roles during sync.
 
 |auth_cache_enabled
 |relevant for Cassandra 3.11 and 4.0 plugins, defaults to `false`
@@ -100,9 +100,6 @@ The content of the configuration file is as follows:
 
 |load_ldap_service
 |defaults to false, if it is true, SPI mechanism will look on class path to load custom implementation of `LDAPUserRetriever`.
-
-|default_roles_membership
-|Comma-separated Cassandra roles to add new LDAP users to by default. Defaults to empty (users will not be added to any role).
 
 |cassandra_ldap_admin_user
 |name of a user/role which will be considered a default superuser, instead of `cassandra`. Please consult "How it Works" section to know more about the usage.
@@ -159,12 +156,12 @@ For fast testing there is Debian OpenLDAP Docker container
 
     docker run -e LDAP_ADMIN_PASSWORD=admin --rm -d -p 389:389 --name ldap1 osixia/openldap
 
-The `ldap.configuration` file in the `conf` directory does not need to be changed, and with the above `docker run` it will work out of the box. You just
+The `ldap.yaml` file in the `conf` directory does not need to be changed, and with the above `docker run` it will work out of the box. You just
 have to put it in `$CASSANDRA_CONF` or set respective configuration property as described above.
 
-## Explanation of filter_template property
+## Explanation of ldap_filter_template property
 
-`filter_template` property is by default `(cn=%s)` where `%s` will be replaced by name you want to log in with.
+`ldap_filter_template` property is by default `(cn=%s)` where `%s` will be replaced by name you want to log in with.
 For example if you do `cqlsh -u myuserinldap`, a search filter for LDAP will be `(cn=myuserinldap)`. You
 may have a different search filter based on your need, a lot of people use e.g. SAM or something similar.
 If you try to log in with `cqlsh -u cn=myuserinldap`, there will be no replacement done and this will be
@@ -177,11 +174,11 @@ This request is made to the LDAP server over plain text, so you should be using 
 side and secure ldap (ldaps) on the LDAP side.
 
 Credentials are sent from your client to the Cassandra server and then tested against the LDAP server for
-authentication using a specified service account. This service account should be configured in the `ldap.properties`
-file using the `service_dn` and `service_password` properties. If `service_dn` is set, such a role will be created in database,
+authentication using a specified service account. This service account should be configured in the `ldap.yaml`
+file using the `ldap_service_dn` and `ldap_service_password` properties. If `ldap_service_dn` is set, such a role will be created in database,
 when not already present, upon node's start.
 
-`service_dn` account, which will be automatically created, will be superuser in Cassandra.
+`ldap_service_dn` account, which will be automatically created, will be superuser in Cassandra.
 
 All "normal" roles are not affected - they behave exactly as you are used to.
 
@@ -191,7 +188,7 @@ Users meant to be authenticated against the LDAP server will not be able to log 
 log in and the disruption of LDAP communication will not affect their ability to do so as they live in Cassandra natively.
 
 In case a user specifies just `test` as login name (or any other name, for that matter), it will try to
-authenticate against database first and if not successful against LDAP using filter `filter_template` which defaults to `(cn=%s)`
+authenticate against database first and if not successful against LDAP using filter `ldap_filter_template` which defaults to `(cn=%s)`
 
 It is possible to delete administration role (e.g. role `cassandra`) but if one does that, all administration operations are only able to
 be done via LDAP account. In case LDAP is down, the operator would not have any control over DB as `cassandra` is not present anymore.
@@ -224,13 +221,11 @@ be just one line - the fully qualified class name (with package) of your custom 
 After you build such plugin, the SPI mechanism upon plugin's initialisation during Cassandra node startup
 will pick up your custom LDAP server connection / authentication logic.
 
-## Default Role Membership
+## LDAP Group To Cassandra Role Sync
 
-It is possible to automatically add new LDAP users to an existing Cassandra role when they are created by setting the
-`default_role_membership` configuration option. When this is set, any LDAP users logging in to Cassandra for the first
-time will be added to the role specified. Users who already exist in Cassandra will not be added to the group. If the
-default role specified does not exist, the role will not be created and new users will not receive the default membership.
-Only one role can be specified.
+LDAP access is controlled by `group_role_mappings`. A user must match at least one configured LDAP group to log in.
+For every successful LDAP authentication, the plugin calculates the union of Cassandra roles mapped from the user's LDAP
+groups and synchronizes the user's managed Cassandra role memberships by granting missing roles and revoking stale ones.
 
 ## Further Information
 - See blog by Stefan Miklosovic about https://www.instaclustr.com/the-instaclustr-ldap-plugin-for-cassandra/[Apache Cassandra LDAP Authentication]

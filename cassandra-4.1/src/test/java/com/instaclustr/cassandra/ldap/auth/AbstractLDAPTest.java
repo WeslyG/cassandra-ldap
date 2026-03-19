@@ -42,13 +42,12 @@ import java.io.*;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Properties;
 
 import static com.github.nosan.embedded.cassandra.WorkingDirectoryCustomizer.addResource;
 import static java.util.Arrays.stream;
@@ -320,7 +319,7 @@ public abstract class AbstractLDAPTest {
                 .withTransitivity()
                 .asFile()).map(file -> file.toPath().toAbsolutePath()).collect(toList());
 
-        final File ldapPropertiesFile = getLdapPropertiesFile(ldapPort);
+        final File ldapConfigFile = getLdapConfigFile(ldapPort);
 
         return new CassandraBuilder()
                 .version(getCassandraVersion())
@@ -328,7 +327,7 @@ public abstract class AbstractLDAPTest {
                 .addSystemProperties(new HashMap<String, String>() {{
                     put("cassandra.jmx.local.port", node.equals("first") ? "7199" : "7200");
                     put("cassandra.ring_delay_ms", "1000");
-                    put("cassandra.ldap.properties.file", ldapPropertiesFile.toPath().toAbsolutePath().toString());
+                    put("cassandra.ldap.config.file", ldapConfigFile.toPath().toAbsolutePath().toString());
                 }})
                 .workingDirectory(() -> Files.createTempDirectory(null))
                 .addWorkingDirectoryCustomizers(new ArrayList<WorkingDirectoryCustomizer>() {{
@@ -385,26 +384,28 @@ public abstract class AbstractLDAPTest {
                 "ldap://127.0.0.1:389");
     }
 
-    protected File getLdapPropertiesFile(int ldapPort) {
+    protected File getLdapConfigFile(int ldapPort) {
         try {
-            File ldapPropertiesFile = Paths.get("../conf/ldap.properties").toFile();
-            Properties ldapProperties = new Properties();
+            final String ldapConfig = ""
+                + "ldap_uri: ldap://127.0.0.1:" + ldapPort + "/dc=example,dc=org\n"
+                + "ldap_service_dn: cn=admin,dc=example,dc=org\n"
+                + "ldap_service_password: admin\n"
+                + "ldap_filter_template: \"(cn=%s)\"\n"
+                + "auth_cache_enabled: true\n"
+                + "allow_empty_password: true\n"
+                + "cassandra_ldap_admin_user: cassandra\n"
+                + "consistency_for_role: LOCAL_ONE\n"
+                + "group_role_mappings:\n"
+                + "  - ldap_group_dn: " + requiredGroupDn + "\n"
+                + "    cassandra_roles:\n"
+                + "      - " + defaultRoleName + "\n"
+                + "      - " + secondDefaultRoleName + "\n";
 
-            try (InputStream is = new BufferedInputStream(new FileInputStream(ldapPropertiesFile))) {
-            ldapProperties.load(is);
-            } catch (Exception ex) {
-                throw new IllegalStateException("Unable to read content of ldap.properties!");
-            }
-
-            ldapProperties.setProperty("ldap_uri", "ldap://127.0.0.1:" + ldapPort + "/dc=example,dc=org");
-            ldapProperties.setProperty("required_group_dn", requiredGroupDn);
-            ldapProperties.setProperty("default_roles_membership", defaultRoleName + "," + secondDefaultRoleName);
-
-            File tempFile = Files.createTempFile("ldap-test", ".properties").toFile();
-            ldapProperties.store(new FileWriter(tempFile, true), "comments");
+            File tempFile = Files.createTempFile("ldap-test", ".yaml").toFile();
+            Files.write(tempFile.toPath(), ldapConfig.getBytes(StandardCharsets.UTF_8));
             return tempFile;
         } catch (Exception ex) {
-            throw new IllegalStateException("Unable to create ldap properties file for test.", ex);
+            throw new IllegalStateException("Unable to create ldap config file for test.", ex);
         }
     }
 }

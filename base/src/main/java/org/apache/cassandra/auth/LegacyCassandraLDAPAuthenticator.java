@@ -19,7 +19,6 @@ package org.apache.cassandra.auth;
 
 import static com.instaclustr.cassandra.ldap.conf.LdapAuthenticatorConfiguration.CASSANDRA_LDAP_ADMIN_USER;
 import static com.instaclustr.cassandra.ldap.conf.LdapAuthenticatorConfiguration.CASSANDRA_LDAP_ADMIN_USER_SYSTEM_PROPERTY;
-import static com.instaclustr.cassandra.ldap.conf.LdapAuthenticatorConfiguration.DEFAULT_ROLE_MEMBERSHIP;
 import static com.instaclustr.cassandra.ldap.utils.ServiceUtils.getService;
 import static java.lang.String.format;
 
@@ -88,7 +87,7 @@ public abstract class LegacyCassandraLDAPAuthenticator extends AbstractLDAPAuthe
 
         clientState.login(new AuthenticatedUser(adminRole));
 
-        final UserRetriever ldapUserRetriever = new DefaultLDAPUserRetriever(hasher, properties);
+        final UserRetriever ldapUserRetriever = new DefaultLDAPUserRetriever(hasher, configuration);
 
         credentialsLoadingFunction = new CredentialsLoadingFunction(cassandraUserRetriever::retrieve,
                                                                     ldapUserRetriever::retrieve);
@@ -117,9 +116,16 @@ public abstract class LegacyCassandraLDAPAuthenticator extends AbstractLDAPAuthe
                     }
                 }
 
-                if (retrievedUser.getLdapDN() != null && systemAuthRoles.roleMissing(retrievedUser.getLdapDN()))
+                if (retrievedUser.getLdapDN() != null)
                 {
-                    systemAuthRoles.createRole(retrievedUser.getLdapDN(), false, properties.getProperty(DEFAULT_ROLE_MEMBERSHIP, null));
+                    if (systemAuthRoles.roleMissing(retrievedUser.getLdapDN()))
+                    {
+                        systemAuthRoles.createRole(retrievedUser.getLdapDN(), false);
+                    }
+
+                    systemAuthRoles.syncGrantedRoles(retrievedUser.getLdapDN(),
+                                                     configuration.resolveGrantedRoles(retrievedUser.getLdapGroupDns()),
+                                                     configuration.getManagedCassandraRoles());
                 }
 
                 final String loginName = retrievedUser.getLdapDN() == null ? retrievedUser.getUsername() : retrievedUser.getLdapDN();

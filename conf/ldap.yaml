@@ -1,0 +1,19 @@
+ldap_uri: ldap://127.0.0.1:389/dc=example,dc=org
+ldap_service_dn: cn=admin,dc=example,dc=org
+ldap_service_password: admin
+ldap_filter_template: "(cn=%s)"
+
+auth_cache_enabled: true
+allow_empty_password: true
+
+cassandra_ldap_admin_user: cassandra
+consistency_for_role: LOCAL_ONE
+
+group_role_mappings:
+  - ldap_group_dn: cn=cassandra-users,dc=example,dc=org
+    cassandra_roles:
+      - keyspace_1
+      - keyspace_2
+  - ldap_group_dn: cn=cassandra-readonly-users,dc=example,dc=org
+    cassandra_roles:
+      - readonly_role

@@ -17,16 +17,13 @@
  */
 package com.instaclustr.cassandra.ldap;
 
-import static com.instaclustr.cassandra.ldap.conf.LdapAuthenticatorConfiguration.LDAP_DN;
-import static com.instaclustr.cassandra.ldap.conf.LdapAuthenticatorConfiguration.PASSWORD_KEY;
-import static java.lang.String.format;
-
 import java.util.Collections;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 
 import com.instaclustr.cassandra.ldap.auth.SystemAuthRoles;
+import com.instaclustr.cassandra.ldap.conf.LdapConfiguration;
 import com.instaclustr.cassandra.ldap.conf.LdapAuthenticatorConfiguration;
 import com.instaclustr.cassandra.ldap.hash.Hasher;
 import com.instaclustr.cassandra.ldap.hash.HasherImpl;
@@ -41,6 +38,7 @@ public abstract class AbstractLDAPAuthenticator implements IAuthenticator
 {
 
     protected Properties properties;
+    protected LdapConfiguration configuration;
 
     protected SystemAuthRoles systemAuthRoles;
 
@@ -62,7 +60,8 @@ public abstract class AbstractLDAPAuthenticator implements IAuthenticator
 
     public void validateConfiguration() throws ConfigurationException
     {
-        properties = new LdapAuthenticatorConfiguration().parseProperties();
+        configuration = new LdapAuthenticatorConfiguration().parseConfiguration();
+        properties = configuration.toProperties();
     }
 
     @Override

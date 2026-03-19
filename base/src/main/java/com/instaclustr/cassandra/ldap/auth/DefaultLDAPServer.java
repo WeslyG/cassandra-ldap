@@ -32,14 +32,16 @@ import javax.naming.ldap.LdapName;
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Hashtable;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Properties;
+import java.util.Set;
 
 import com.instaclustr.cassandra.ldap.User;
 import com.instaclustr.cassandra.ldap.auth.DefaultLDAPServer.LDAPInitialContext.CloseableLdapContext;
-import com.instaclustr.cassandra.ldap.conf.LdapAuthenticatorConfiguration;
+import com.instaclustr.cassandra.ldap.conf.LdapConfiguration;
 import com.instaclustr.cassandra.ldap.exception.LDAPAuthFailedException;
 import com.instaclustr.cassandra.ldap.hash.Hasher;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -56,7 +58,7 @@ public class DefaultLDAPServer extends LDAPUserRetriever
         private static final Logger logger = LoggerFactory.getLogger(LDAPInitialContext.class);
 
         private CloseableLdapContext ldapContext;
-        private Properties properties;
+        private LdapConfiguration configuration;
 
         private static final String MEMBER_OF_ATTRIBUTE = "memberOf";
         private static final String GROUP_MEMBER_ATTRIBUTE = "member";
@@ -65,18 +67,18 @@ public class DefaultLDAPServer extends LDAPUserRetriever
         private final LdapName baseDn;
         private final String rootLdapUri;
 
-        public LDAPInitialContext(final Properties properties)
+        public LDAPInitialContext(final LdapConfiguration configuration)
         {
-            this.properties = properties;
-            this.baseDn = parseBaseDn(properties.getProperty(LdapAuthenticatorConfiguration.LDAP_URI_PROP));
+            this.configuration = configuration;
+            this.baseDn = parseBaseDn(configuration.getLdapUri());
 
-            final Properties ldapProperties = new Properties();
+            final Hashtable<String, String> ldapProperties = new Hashtable<>();
 
-            final String serviceDN = properties.getProperty(LdapAuthenticatorConfiguration.LDAP_DN);
-            final String servicePass = properties.getProperty(LdapAuthenticatorConfiguration.PASSWORD_KEY);
-            final String ldapUri = properties.getProperty(LdapAuthenticatorConfiguration.LDAP_URI_PROP);
+            final String serviceDN = configuration.getLdapServiceDn();
+            final String servicePass = configuration.getLdapServicePassword();
+            final String ldapUri = configuration.getLdapUri();
 
-            ldapProperties.put(Context.INITIAL_CONTEXT_FACTORY, properties.getProperty(LdapAuthenticatorConfiguration.CONTEXT_FACTORY_PROP));
+            ldapProperties.put(Context.INITIAL_CONTEXT_FACTORY, configuration.getLdapContextFactory());
             ldapProperties.put(Context.PROVIDER_URL, ldapUri);
             ldapProperties.put(Context.SECURITY_PRINCIPAL, serviceDN);
             ldapProperties.put(Context.SECURITY_CREDENTIALS, servicePass);
@@ -118,7 +120,7 @@ public class DefaultLDAPServer extends LDAPUserRetriever
 
         public String searchLdapDN(final String username) throws NamingException
         {
-            final String filterTemplate = properties.getProperty(LdapAuthenticatorConfiguration.FILTER_TEMPLATE);
+            final String filterTemplate = configuration.getLdapFilterTemplate();
             final String filter = format(filterTemplate, username);
 
             logger.debug("User name is {}, going to use filter: {}", username, filter);
@@ -184,6 +186,24 @@ public class DefaultLDAPServer extends LDAPUserRetriever
             return isUserListedInGroup(groupDn, normalizeDn(userDn));
         }
 
+        public Set<String> findMatchingGroups(final String userDn, final Set<String> candidateGroupDns) throws NamingException
+        {
+            final Set<String> matchedGroupDns = new LinkedHashSet<>();
+            final Set<String> userMemberOfGroups = getMemberOfGroups(userDn);
+            final String normalizedUserDn = normalizeDn(userDn);
+
+            for (final String candidateGroupDn : candidateGroupDns)
+            {
+                final String normalizedCandidateGroupDn = normalizeDn(candidateGroupDn);
+                if (userMemberOfGroups.contains(normalizedCandidateGroupDn) || isUserListedInGroup(candidateGroupDn, normalizedUserDn))
+                {
+                    matchedGroupDns.add(normalizedCandidateGroupDn);
+                }
+            }
+
+            return matchedGroupDns;
+        }
+
         private boolean isMemberOfGroup(final String userDn, final String normalizedGroupDn) throws NamingException
         {
             try
@@ -206,6 +226,19 @@ public class DefaultLDAPServer extends LDAPUserRetriever
                 return true;
             }
             return attributeContainsDn(attributes.get(GROUP_UNIQUE_MEMBER_ATTRIBUTE), normalizedUserDn);
+        }
+
+        private Set<String> getMemberOfGroups(final String userDn)
+        {
+            try
+            {
+                final Attributes attributes = getAttributesWithFallback(userDn, new String[] { MEMBER_OF_ATTRIBUTE });
+                return attributeValuesAsNormalizedDns(attributes.get(MEMBER_OF_ATTRIBUTE));
+            } catch (final NamingException ex)
+            {
+                logger.debug("Unable to read memberOf for {}", userDn, ex);
+                return Collections.emptySet();
+            }
         }
 
         private boolean attributeContainsDn(final Attribute attribute, final String normalizedDn) throws NamingException
@@ -249,7 +282,7 @@ public class DefaultLDAPServer extends LDAPUserRetriever
                 originalException = ex;
             }
 
-            if (rootLdapUri == null || rootLdapUri.equals(properties.getProperty(LdapAuthenticatorConfiguration.LDAP_URI_PROP)))
+            if (rootLdapUri == null || rootLdapUri.equals(configuration.getLdapUri()))
             {
                 throw originalException;
             }
@@ -279,12 +312,12 @@ public class DefaultLDAPServer extends LDAPUserRetriever
 
         private CloseableLdapContext openRootContext() throws NamingException
         {
-            final Properties ldapProperties = new Properties();
+            final Hashtable<String, String> ldapProperties = new Hashtable<>();
 
-            final String serviceDN = properties.getProperty(LdapAuthenticatorConfiguration.LDAP_DN);
-            final String servicePass = properties.getProperty(LdapAuthenticatorConfiguration.PASSWORD_KEY);
+            final String serviceDN = configuration.getLdapServiceDn();
+            final String servicePass = configuration.getLdapServicePassword();
 
-            ldapProperties.put(Context.INITIAL_CONTEXT_FACTORY, properties.getProperty(LdapAuthenticatorConfiguration.CONTEXT_FACTORY_PROP));
+            ldapProperties.put(Context.INITIAL_CONTEXT_FACTORY, configuration.getLdapContextFactory());
             ldapProperties.put(Context.PROVIDER_URL, rootLdapUri);
             ldapProperties.put(Context.SECURITY_PRINCIPAL, serviceDN);
             ldapProperties.put(Context.SECURITY_CREDENTIALS, servicePass);
@@ -400,11 +433,39 @@ public class DefaultLDAPServer extends LDAPUserRetriever
 
         private String normalizeDn(final String dn)
         {
-            if (dn == null)
+            return LdapConfiguration.normalizeDn(dn);
+        }
+
+        private Set<String> attributeValuesAsNormalizedDns(final Attribute attribute) throws NamingException
+        {
+            if (attribute == null)
             {
-                return null;
+                return Collections.emptySet();
             }
-            return dn.trim().toLowerCase(Locale.ROOT);
+
+            final Set<String> valuesSet = new LinkedHashSet<>();
+            NamingEnumeration<?> values = null;
+
+            try
+            {
+                values = attribute.getAll();
+                while (values.hasMore())
+                {
+                    final Object value = values.next();
+                    if (value != null)
+                    {
+                        valuesSet.add(normalizeDn(value.toString()));
+                    }
+                }
+            } finally
+            {
+                if (values != null)
+                {
+                    values.close();
+                }
+            }
+
+            return valuesSet;
         }
 
         @Override
@@ -424,9 +485,9 @@ public class DefaultLDAPServer extends LDAPUserRetriever
     }
 
     @Override
-    public UserRetriever setup(final Hasher hasher, final Properties properties) throws ConfigurationException
+    public UserRetriever setup(final Hasher hasher, final LdapConfiguration configuration) throws ConfigurationException
     {
-        this.properties = properties;
+        this.configuration = configuration;
         this.hasher = hasher;
         return this;
     }
@@ -434,7 +495,7 @@ public class DefaultLDAPServer extends LDAPUserRetriever
     @Override
     public User retrieve(User user) throws LDAPAuthFailedException
     {
-        try (final LDAPInitialContext context = new LDAPInitialContext(properties))
+        try (final LDAPInitialContext context = new LDAPInitialContext(configuration))
         {
             final String ldapDn = context.searchLdapDN(user.getUsername());
 
@@ -442,25 +503,26 @@ public class DefaultLDAPServer extends LDAPUserRetriever
 
             final Hashtable<String, String> env = getUserEnv(ldapDn,
                                                              user.getPassword(),
-                                                             properties.getProperty(LdapAuthenticatorConfiguration.CONTEXT_FACTORY_PROP),
-                                                             properties.getProperty(LdapAuthenticatorConfiguration.LDAP_URI_PROP));
+                                                             configuration.getLdapContextFactory(),
+                                                             configuration.getLdapUri());
 
             try (final CloseableLdapContext ldapContext = new CloseableLdapContext(new InitialDirContext(env)))
             {
                 logger.debug("Logging to LDAP with {} was ok!", user);
 
-                final String requiredGroupDn = properties.getProperty(LdapAuthenticatorConfiguration.REQUIRED_GROUP_DN);
-                if (requiredGroupDn != null && !context.isUserInGroup(ldapDn, requiredGroupDn))
+                final Set<String> matchedGroupDns = context.findMatchingGroups(ldapDn, configuration.getMappedLdapGroupDns());
+                if (matchedGroupDns.isEmpty())
                 {
                     throw new LDAPAuthFailedException(ExceptionCode.UNAUTHORIZED,
-                                                      "User " + user.getUsername() + " is not a member of required LDAP group.",
+                                                      "User " + user.getUsername() + " is not a member of any configured LDAP group.",
                                                       null);
                 }
 
                 final User foundUser = new User(user.getUsername(),
                                           hasher.hashPassword(user.getPassword(),
-                                                              LdapAuthenticatorConfiguration.getGensaltLog2Rounds(this.properties)));
+                                                              configuration.getAuthBcryptGensaltLog2Rounds()));
                 foundUser.setLdapDN(ldapDn);
+                foundUser.setLdapGroupDns(matchedGroupDns);
 
                 return foundUser;
             }
