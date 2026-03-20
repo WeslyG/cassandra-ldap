@@ -149,6 +149,18 @@ public final class LdapConfiguration
         return managedCassandraRoles;
     }
 
+    public Set<KeyspacePermissionGrant> getManagedKeyspacePermissionGrants()
+    {
+        final Set<KeyspacePermissionGrant> managedKeyspacePermissionGrants = new LinkedHashSet<>();
+
+        for (final GroupRoleMapping groupRoleMapping : groupRoleMappings)
+        {
+            managedKeyspacePermissionGrants.addAll(groupRoleMapping.getKeyspacePermissionGrants());
+        }
+
+        return managedKeyspacePermissionGrants;
+    }
+
     public Set<String> resolveGrantedRoles(final Set<String> ldapGroupDns)
     {
         final Set<String> normalizedUserGroups = new LinkedHashSet<>();
@@ -167,6 +179,26 @@ public final class LdapConfiguration
         }
 
         return grantedRoles;
+    }
+
+    public Set<KeyspacePermissionGrant> resolveGrantedKeyspacePermissions(final Set<String> ldapGroupDns)
+    {
+        final Set<String> normalizedUserGroups = new LinkedHashSet<>();
+        for (final String ldapGroupDn : ldapGroupDns)
+        {
+            normalizedUserGroups.add(normalizeDn(ldapGroupDn));
+        }
+
+        final Set<KeyspacePermissionGrant> grantedKeyspacePermissions = new LinkedHashSet<>();
+        for (final GroupRoleMapping groupRoleMapping : groupRoleMappings)
+        {
+            if (normalizedUserGroups.contains(groupRoleMapping.getNormalizedLdapGroupDn()))
+            {
+                grantedKeyspacePermissions.addAll(groupRoleMapping.getKeyspacePermissionGrants());
+            }
+        }
+
+        return grantedKeyspacePermissions;
     }
 
     public Properties toProperties()

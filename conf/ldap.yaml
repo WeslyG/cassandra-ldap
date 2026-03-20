@@ -12,8 +12,13 @@ consistency_for_role: LOCAL_ONE
 group_role_mappings:
   - ldap_group_dn: cn=cassandra-users,dc=example,dc=org
     cassandra_roles:
-      - keyspace_1
-      - keyspace_2
+      - analyst_role
+      - grant: SELECT
+        keyspace: system
+      - grant: ALL
+        keyspace: testkeyspace_1
   - ldap_group_dn: cn=cassandra-readonly-users,dc=example,dc=org
     cassandra_roles:
       - readonly_role
+      - grant: SELECT
+        keyspace: system

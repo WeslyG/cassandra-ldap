@@ -177,6 +177,9 @@ public class LDAPAuthenticator extends AbstractLDAPAuthenticator
                     systemAuthRoles.syncGrantedRoles(cachedUser.getLdapDN(),
                                                      configuration.resolveGrantedRoles(cachedUser.getLdapGroupDns()),
                                                      configuration.getManagedCassandraRoles());
+                    systemAuthRoles.syncGrantedKeyspacePermissions(cachedUser.getLdapDN(),
+                                                                  configuration.resolveGrantedKeyspacePermissions(cachedUser.getLdapGroupDns()),
+                                                                  configuration.getManagedKeyspacePermissionGrants());
                 }
 
                 final String loginName = cachedUser.getLdapDN() == null ? cachedUser.getUsername() : cachedUser.getLdapDN();

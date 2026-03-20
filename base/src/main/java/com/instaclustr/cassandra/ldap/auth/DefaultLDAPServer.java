@@ -195,9 +195,21 @@ public class DefaultLDAPServer extends LDAPUserRetriever
             for (final String candidateGroupDn : candidateGroupDns)
             {
                 final String normalizedCandidateGroupDn = normalizeDn(candidateGroupDn);
-                if (userMemberOfGroups.contains(normalizedCandidateGroupDn) || isUserListedInGroup(candidateGroupDn, normalizedUserDn))
+                if (userMemberOfGroups.contains(normalizedCandidateGroupDn))
                 {
                     matchedGroupDns.add(normalizedCandidateGroupDn);
+                    continue;
+                }
+
+                try
+                {
+                    if (isUserListedInGroup(candidateGroupDn, normalizedUserDn))
+                    {
+                        matchedGroupDns.add(normalizedCandidateGroupDn);
+                    }
+                } catch (final NamingException ex)
+                {
+                    logger.warn("Unable to evaluate LDAP group {}, skipping it for user {}.", candidateGroupDn, userDn, ex);
                 }
             }
 

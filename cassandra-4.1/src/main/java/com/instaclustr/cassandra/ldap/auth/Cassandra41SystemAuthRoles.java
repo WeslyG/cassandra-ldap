@@ -26,8 +26,14 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 import com.google.common.base.Function;
+import com.instaclustr.cassandra.ldap.conf.KeyspacePermissionGrant;
 import org.apache.cassandra.auth.AuthKeyspace;
+import org.apache.cassandra.auth.DataResource;
 import org.apache.cassandra.auth.LDAPCassandraRoleManager.Role;
+import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.PermissionDetails;
+import org.apache.cassandra.auth.RoleResource;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
@@ -209,6 +215,51 @@ public class Cassandra41SystemAuthRoles implements SystemAuthRoles
     }
 
     @Override
+    public void syncGrantedKeyspacePermissions(final String userRoleName,
+                                              final Set<KeyspacePermissionGrant> desiredKeyspacePermissions,
+                                              final Set<KeyspacePermissionGrant> managedKeyspacePermissions)
+    {
+        final Set<KeyspacePermissionGrant> currentManagedPermissions = new LinkedHashSet<>(getGrantedKeyspacePermissions(userRoleName));
+        currentManagedPermissions.retainAll(managedKeyspacePermissions);
+
+        final Set<KeyspacePermissionGrant> permissionsToGrant = new LinkedHashSet<>(desiredKeyspacePermissions);
+        permissionsToGrant.removeAll(currentManagedPermissions);
+
+        final Set<KeyspacePermissionGrant> permissionsToRevoke = new LinkedHashSet<>(currentManagedPermissions);
+        permissionsToRevoke.removeAll(desiredKeyspacePermissions);
+
+        for (final KeyspacePermissionGrant permissionGrant : permissionsToGrant)
+        {
+            try
+            {
+                logger.debug("Granting {} to user {}", permissionGrant, userRoleName);
+                DatabaseDescriptor.getAuthorizer().grant(getClientState().getUser(),
+                                                         Collections.singleton(Permission.valueOf(permissionGrant.getGrant())),
+                                                         DataResource.keyspace(permissionGrant.getKeyspace()),
+                                                         RoleResource.role(userRoleName));
+            } catch (final Exception ex)
+            {
+                logger.warn("Unable to grant {} to user {}.", permissionGrant, userRoleName, ex);
+            }
+        }
+
+        for (final KeyspacePermissionGrant permissionGrant : permissionsToRevoke)
+        {
+            try
+            {
+                logger.debug("Revoking {} from user {}", permissionGrant, userRoleName);
+                DatabaseDescriptor.getAuthorizer().revoke(getClientState().getUser(),
+                                                          Collections.singleton(Permission.valueOf(permissionGrant.getGrant())),
+                                                          DataResource.keyspace(permissionGrant.getKeyspace()),
+                                                          RoleResource.role(userRoleName));
+            } catch (final Exception ex)
+            {
+                logger.warn("Unable to revoke {} from user {}.", permissionGrant, userRoleName, ex);
+            }
+        }
+    }
+
+    @Override
     public Role getRole(String name, ConsistencyLevel roleConsistencyLevel)
         throws RequestExecutionException, RequestValidationException {
 
@@ -224,5 +275,36 @@ public class Cassandra41SystemAuthRoles implements SystemAuthRoles
         }
 
         return ROW_TO_ROLE.apply(UntypedResultSet.create(rows.result).one());
+    }
+
+    private Set<KeyspacePermissionGrant> getGrantedKeyspacePermissions(final String userRoleName)
+    {
+        final Set<KeyspacePermissionGrant> keyspacePermissions = new LinkedHashSet<>();
+
+        try
+        {
+            final Set<PermissionDetails> permissions = DatabaseDescriptor.getAuthorizer().list(getClientState().getUser(),
+                                                                                               Permission.ALL,
+                                                                                               null,
+                                                                                               RoleResource.role(userRoleName));
+
+            for (final PermissionDetails permissionDetails : permissions)
+            {
+                if (permissionDetails.resource instanceof DataResource)
+                {
+                    final DataResource dataResource = (DataResource) permissionDetails.resource;
+                    if (dataResource.isKeyspaceLevel())
+                    {
+                        keyspacePermissions.add(new KeyspacePermissionGrant(permissionDetails.permission.name(),
+                                                                           dataResource.getKeyspace()));
+                    }
+                }
+            }
+        } catch (final Exception ex)
+        {
+            throw new RuntimeException(format("Unable to load keyspace permissions for role %s", userRoleName), ex);
+        }
+
+        return keyspacePermissions;
     }
 }

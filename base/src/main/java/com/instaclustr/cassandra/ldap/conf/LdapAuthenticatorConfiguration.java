@@ -29,6 +29,8 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 
+import org.apache.cassandra.auth.DataResource;
+import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,6 +55,8 @@ public final class LdapAuthenticatorConfiguration
     public static final String GROUP_ROLE_MAPPINGS = "group_role_mappings";
     public static final String GROUP_ROLE_MAPPING_LDAP_GROUP_DN = "ldap_group_dn";
     public static final String GROUP_ROLE_MAPPING_CASSANDRA_ROLES = "cassandra_roles";
+    public static final String GROUP_ROLE_MAPPING_PERMISSION_GRANT = "grant";
+    public static final String GROUP_ROLE_MAPPING_PERMISSION_KEYSPACE = "keyspace";
 
     public static final String CASSANDRA_AUTH_CACHE_ENABLED_PROP = "auth_cache_enabled";
     public static final String ALLOW_EMPTY_PASSWORD_PROP = "allow_empty_password";
@@ -224,9 +228,9 @@ public final class LdapAuthenticatorConfiguration
 
             final Map<?, ?> mapping = (Map<?, ?>) rawMapping;
             final String ldapGroupDn = requireString(mapping, GROUP_ROLE_MAPPING_LDAP_GROUP_DN, configurationFile);
-            final Set<String> cassandraRoles = parseCassandraRoles(mapping.get(GROUP_ROLE_MAPPING_CASSANDRA_ROLES),
-                                                                   configurationFile,
-                                                                   ldapGroupDn);
+            final GroupRoleTargets groupRoleTargets = parseCassandraRoles(mapping.get(GROUP_ROLE_MAPPING_CASSANDRA_ROLES),
+                                                                          configurationFile,
+                                                                          ldapGroupDn);
 
             final String normalizedGroupDn = LdapConfiguration.normalizeDn(ldapGroupDn);
             if (!seenGroupDns.add(normalizedGroupDn))
@@ -236,24 +240,39 @@ public final class LdapAuthenticatorConfiguration
                                                         configurationFile.getAbsolutePath()));
             }
 
-            groupRoleMappings.add(new GroupRoleMapping(ldapGroupDn, cassandraRoles));
+            groupRoleMappings.add(new GroupRoleMapping(ldapGroupDn,
+                                                      groupRoleTargets.cassandraRoles,
+                                                      groupRoleTargets.keyspacePermissionGrants));
         }
 
         return groupRoleMappings;
     }
 
-    private Set<String> parseCassandraRoles(final Object rawRoles, final File configurationFile, final String ldapGroupDn) throws ConfigurationException
+    private GroupRoleTargets parseCassandraRoles(final Object rawRoles, final File configurationFile, final String ldapGroupDn) throws ConfigurationException
     {
         final Set<String> cassandraRoles = new LinkedHashSet<>();
+        final Set<KeyspacePermissionGrant> keyspacePermissionGrants = new LinkedHashSet<>();
 
         if (rawRoles instanceof List)
         {
-            for (final Object rawRole : (List<?>) rawRoles)
+            for (final Object rawTarget : (List<?>) rawRoles)
             {
-                final String role = normalizeString(rawRole, GROUP_ROLE_MAPPING_CASSANDRA_ROLES, configurationFile);
-                if (!role.isEmpty())
+                if (rawTarget instanceof String)
                 {
-                    cassandraRoles.add(role);
+                    final String role = normalizeString(rawTarget, GROUP_ROLE_MAPPING_CASSANDRA_ROLES, configurationFile);
+                    if (!role.isEmpty())
+                    {
+                        cassandraRoles.add(role);
+                    }
+                } else if (rawTarget instanceof Map)
+                {
+                    keyspacePermissionGrants.addAll(parseKeyspacePermissionGrant((Map<?, ?>) rawTarget, configurationFile, ldapGroupDn));
+                } else
+                {
+                    throw new ConfigurationException(format("%s entries for LDAP group %s must be strings or YAML objects in %s",
+                                                            GROUP_ROLE_MAPPING_CASSANDRA_ROLES,
+                                                            ldapGroupDn,
+                                                            configurationFile.getAbsolutePath()));
                 }
             }
         } else if (rawRoles instanceof String)
@@ -274,7 +293,7 @@ public final class LdapAuthenticatorConfiguration
                                                     configurationFile.getAbsolutePath()));
         }
 
-        if (cassandraRoles.isEmpty())
+        if (cassandraRoles.isEmpty() && keyspacePermissionGrants.isEmpty())
         {
             throw new ConfigurationException(format("%s for LDAP group %s can not be empty in %s",
                                                     GROUP_ROLE_MAPPING_CASSANDRA_ROLES,
@@ -282,7 +301,38 @@ public final class LdapAuthenticatorConfiguration
                                                     configurationFile.getAbsolutePath()));
         }
 
-        return cassandraRoles;
+        return new GroupRoleTargets(cassandraRoles, keyspacePermissionGrants);
+    }
+
+    private Set<KeyspacePermissionGrant> parseKeyspacePermissionGrant(final Map<?, ?> rawGrant,
+                                                                      final File configurationFile,
+                                                                      final String ldapGroupDn) throws ConfigurationException
+    {
+        final String grant = requireString(rawGrant, GROUP_ROLE_MAPPING_PERMISSION_GRANT, configurationFile);
+        final String keyspace = requireString(rawGrant, GROUP_ROLE_MAPPING_PERMISSION_KEYSPACE, configurationFile);
+        final Set<KeyspacePermissionGrant> permissionGrants = new LinkedHashSet<>();
+
+        try
+        {
+            if ("ALL".equalsIgnoreCase(grant))
+            {
+                for (final Permission permission : DataResource.keyspace(keyspace).applicablePermissions())
+                {
+                    permissionGrants.add(new KeyspacePermissionGrant(permission.name(), keyspace));
+                }
+                return permissionGrants;
+            }
+
+            permissionGrants.add(new KeyspacePermissionGrant(grant, keyspace));
+            return permissionGrants;
+        } catch (final IllegalArgumentException ex)
+        {
+            throw new ConfigurationException(format("Invalid keyspace permission grant for LDAP group %s in %s: %s",
+                                                    ldapGroupDn,
+                                                    configurationFile.getAbsolutePath(),
+                                                    ex.getMessage()),
+                                             ex);
+        }
     }
 
     private String requireString(final Map<?, ?> root, final String key, final File configurationFile) throws ConfigurationException
@@ -361,5 +411,17 @@ public final class LdapAuthenticatorConfiguration
         }
 
         return value.toString().trim();
+    }
+
+    private static final class GroupRoleTargets
+    {
+        private final Set<String> cassandraRoles;
+        private final Set<KeyspacePermissionGrant> keyspacePermissionGrants;
+
+        private GroupRoleTargets(final Set<String> cassandraRoles, final Set<KeyspacePermissionGrant> keyspacePermissionGrants)
+        {
+            this.cassandraRoles = cassandraRoles;
+            this.keyspacePermissionGrants = keyspacePermissionGrants;
+        }
     }
 }

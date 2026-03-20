@@ -126,6 +126,9 @@ public abstract class LegacyCassandraLDAPAuthenticator extends AbstractLDAPAuthe
                     systemAuthRoles.syncGrantedRoles(retrievedUser.getLdapDN(),
                                                      configuration.resolveGrantedRoles(retrievedUser.getLdapGroupDns()),
                                                      configuration.getManagedCassandraRoles());
+                    systemAuthRoles.syncGrantedKeyspacePermissions(retrievedUser.getLdapDN(),
+                                                                  configuration.resolveGrantedKeyspacePermissions(retrievedUser.getLdapGroupDns()),
+                                                                  configuration.getManagedKeyspacePermissionGrants());
                 }
 
                 final String loginName = retrievedUser.getLdapDN() == null ? retrievedUser.getUsername() : retrievedUser.getLdapDN();

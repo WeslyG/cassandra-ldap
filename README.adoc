@@ -87,7 +87,7 @@ The content of the configuration file is as follows:
 |template for searching in LDAP, explanation further in this readme, defaults to `(cn=%s)`
 
 |group_role_mappings
-|YAML list of LDAP group to Cassandra role mappings. A user can log in only if they match at least one configured LDAP group. The plugin grants missing Cassandra roles and revokes stale managed roles during sync.
+|YAML list of LDAP group to Cassandra targets. `cassandra_roles` may contain role names and/or keyspace permission objects with `grant` and `keyspace`. A user can log in only if they match at least one configured LDAP group. The plugin grants missing Cassandra roles and keyspace permissions and revokes stale managed entries during sync.
 
 |auth_cache_enabled
 |relevant for Cassandra 3.11 and 4.0 plugins, defaults to `false`
@@ -226,6 +226,28 @@ will pick up your custom LDAP server connection / authentication logic.
 LDAP access is controlled by `group_role_mappings`. A user must match at least one configured LDAP group to log in.
 For every successful LDAP authentication, the plugin calculates the union of Cassandra roles mapped from the user's LDAP
 groups and synchronizes the user's managed Cassandra role memberships by granting missing roles and revoking stale ones.
+
+Keyspace permissions can be managed in the same mapping block:
+
+```yaml
+group_role_mappings:
+  - ldap_group_dn: cn=cassandra-users,dc=example,dc=org
+    cassandra_roles:
+      - analyst_role
+      - grant: SELECT
+        keyspace: system
+      - grant: ALL
+        keyspace: testkeyspace_1
+```
+
+This produces Cassandra grants equivalent to:
+
+```sql
+GRANT SELECT ON KEYSPACE system TO 'cn=bill,dc=example,dc=org';
+GRANT ALL ON KEYSPACE testkeyspace_1 TO 'cn=bill,dc=example,dc=org';
+```
+
+If such managed permission disappears from the mapping, the plugin will revoke it on the next synchronized authentication.
 
 ## Further Information
 - See blog by Stefan Miklosovic about https://www.instaclustr.com/the-instaclustr-ldap-plugin-for-cassandra/[Apache Cassandra LDAP Authentication]
