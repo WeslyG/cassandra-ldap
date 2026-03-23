@@ -33,7 +33,12 @@
             <version>3.0.31</version>
             <scope>provided</scope>
         </dependency>
+        <dependency>
+            <groupId>org.yaml</groupId>
+            <artifactId>snakeyaml</artifactId>
+            <version>1.11</version>
+            <scope>provided</scope>
+        </dependency>
     </dependencies>
 
 </project>
-

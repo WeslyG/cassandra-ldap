@@ -17,15 +17,14 @@
  */
 package com.instaclustr.cassandra.ldap.auth;
 
-import java.util.Properties;
-
+import com.instaclustr.cassandra.ldap.conf.LdapConfiguration;
 import com.instaclustr.cassandra.ldap.hash.Hasher;
 import org.apache.cassandra.exceptions.ConfigurationException;
 
 public abstract class LDAPUserRetriever implements UserRetriever {
 
     protected Hasher hasher;
-    protected Properties properties;
+    protected LdapConfiguration configuration;
 
-    public abstract UserRetriever setup(Hasher hasher, Properties properties) throws ConfigurationException;
+    public abstract UserRetriever setup(Hasher hasher, LdapConfiguration configuration) throws ConfigurationException;
 }

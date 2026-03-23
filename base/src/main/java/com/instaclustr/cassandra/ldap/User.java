@@ -17,6 +17,9 @@
  */
 package com.instaclustr.cassandra.ldap;
 
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.StringJoiner;
 
 import org.apache.commons.lang3.builder.HashCodeBuilder;
@@ -29,6 +32,8 @@ public class User
     private String password;
 
     private String ldapDN = null;
+
+    private Set<String> ldapGroupDns = Collections.emptySet();
 
     public User(String username)
     {
@@ -72,6 +77,22 @@ public class User
     public String getPassword()
     {
         return password;
+    }
+
+    public Set<String> getLdapGroupDns()
+    {
+        return ldapGroupDns;
+    }
+
+    public void setLdapGroupDns(final Set<String> ldapGroupDns)
+    {
+        if (ldapGroupDns == null)
+        {
+            this.ldapGroupDns = Collections.emptySet();
+            return;
+        }
+
+        this.ldapGroupDns = Collections.unmodifiableSet(new LinkedHashSet<>(ldapGroupDns));
     }
 
     public boolean equals(Object obj)
@@ -123,6 +144,7 @@ public class User
             .add("username='" + username + "'")
             .add("password=redacted")
             .add("ldapDN='" + ldapDN + "'")
+            .add("ldapGroupDns=" + ldapGroupDns)
             .toString();
     }
 }

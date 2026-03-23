@@ -1,32 +1,31 @@
 package com.instaclustr.cassandra.ldap.auth;
 
-import java.util.Properties;
-
 import com.instaclustr.cassandra.ldap.User;
+import com.instaclustr.cassandra.ldap.conf.LdapConfiguration;
 import com.instaclustr.cassandra.ldap.hash.Hasher;
 import com.instaclustr.cassandra.ldap.utils.ServiceUtils;
 
 public class DefaultLDAPUserRetriever implements UserRetriever {
 
     private final Hasher hasher;
-    private final Properties properties;
+    private final LdapConfiguration configuration;
     private final boolean dontLoadService;
 
-    public DefaultLDAPUserRetriever(final Hasher hasher, final Properties properties) {
+    public DefaultLDAPUserRetriever(final Hasher hasher, final LdapConfiguration configuration) {
         this.hasher = hasher;
-        this.properties = properties;
-        this.dontLoadService = !Boolean.parseBoolean(properties.getProperty("load_ldap_service", "false"));
+        this.configuration = configuration;
+        this.dontLoadService = !configuration.isLoadLdapService();
     }
 
     @Override
     public User retrieve(final User user) {
         if (dontLoadService)
         {
-            return new DefaultLDAPServer().setup(hasher, properties).retrieve(user);
+            return new DefaultLDAPServer().setup(hasher, configuration).retrieve(user);
         }
         else
         {
-            return ServiceUtils.getService(LDAPUserRetriever.class, DefaultLDAPServer.class).setup(hasher, properties).retrieve(user);
+            return ServiceUtils.getService(LDAPUserRetriever.class, DefaultLDAPServer.class).setup(hasher, configuration).retrieve(user);
         }
     }
 }

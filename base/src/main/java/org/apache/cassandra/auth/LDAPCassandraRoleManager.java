@@ -35,6 +35,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Uninterruptibles;
 import com.instaclustr.cassandra.ldap.AbstractLDAPAuthenticator;
 import com.instaclustr.cassandra.ldap.auth.SystemAuthRoles;
+import com.instaclustr.cassandra.ldap.conf.LdapConfiguration;
 import com.instaclustr.cassandra.ldap.conf.LdapAuthenticatorConfiguration;
 import com.instaclustr.cassandra.ldap.utils.ServiceUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -56,6 +57,7 @@ public class LDAPCassandraRoleManager extends CassandraRoleManager
     private static final Logger logger = LoggerFactory.getLogger(LDAPCassandraRoleManager.class);
 
     private Properties properties;
+    private LdapConfiguration configuration;
 
     private ClientState clientState;
 
@@ -66,7 +68,8 @@ public class LDAPCassandraRoleManager extends CassandraRoleManager
     @Override
     public void validateConfiguration() throws ConfigurationException
     {
-        properties = new LdapAuthenticatorConfiguration().parseProperties();
+        configuration = new LdapAuthenticatorConfiguration().parseConfiguration();
+        properties = configuration.toProperties();
         roleConsistencyLevel = ConsistencyLevel.valueOf(properties.getProperty(CONSISTENCY_FOR_ROLE, DEFAULT_CONSISTENCY_FOR_ROLE));
     }
 
@@ -119,7 +122,7 @@ public class LDAPCassandraRoleManager extends CassandraRoleManager
                 {
                     if (systemAuthRoles.roleMissing(ldapAdminRole))
                     {
-                        systemAuthRoles.createRole(ldapAdminRole, true, null);
+                        systemAuthRoles.createRole(ldapAdminRole, true);
                         logger.info("Created LDAP admin role '{}'", ldapAdminRole);
                     } else
                     {
@@ -215,6 +218,11 @@ public class LDAPCassandraRoleManager extends CassandraRoleManager
 
         public int hashCode() {
             return Objects.hashCode(name);
+        }
+
+        public Set<String> getMemberOf()
+        {
+            return memberOf;
         }
 
         @Override
