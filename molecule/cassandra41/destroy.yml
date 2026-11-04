@@ -1,0 +1,24 @@
+- name: Destroy only integration resources
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Remove integration containers and volumes
+      ansible.builtin.command:
+        argv: [docker, compose, -f, "{{ playbook_dir }}/compose.yaml", down, -v, --remove-orphans]
+      changed_when: true
+    - name: Ensure fixture state directory exists
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/.state"
+        state: directory
+        mode: '0755'
+    - name: Reset bootstrap mode for the next fresh cluster
+      ansible.builtin.copy:
+        content: bootstrap
+        dest: "{{ playbook_dir }}/.state/mode"
+        mode: '0600'
+    - name: Reset policy fixture
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/ldap.yaml"
+        dest: "{{ playbook_dir }}/.state/ldap.yaml"
+        mode: '0644'

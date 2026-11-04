@@ -57,6 +57,17 @@ import org.slf4j.LoggerFactory;
 
 public class Cassandra41SystemAuthRoles implements SystemAuthRoles
 {
+    private final Cassandra41AccessSync accessSync = new Cassandra41AccessSync(this);
+
+    @Override
+    public void startSynchronization(com.instaclustr.cassandra.ldap.conf.LdapConfiguration configuration) { accessSync.start(configuration); }
+
+    @Override
+    public void synchronizeLdapUser(String userRoleName, com.instaclustr.cassandra.ldap.conf.LdapConfiguration configuration)
+    {
+        if (!accessSync.sync(userRoleName, configuration))
+            throw new org.apache.cassandra.exceptions.AuthenticationException("User is not a member of any configured LDAP group");
+    }
 
     private static final Logger logger = LoggerFactory.getLogger(SystemAuthRoles.class);
 
@@ -153,7 +164,7 @@ public class Cassandra41SystemAuthRoles implements SystemAuthRoles
     public void createRole(String userRoleName, boolean superUser)
     {
         final CreateRoleStatement createStmt = (CreateRoleStatement) QueryProcessor.getStatement(format(CREATE_ROLE_STATEMENT_WITH_LOGIN,
-                                                                                                        userRoleName,
+                                                                                                        userRoleName.replace("\"", "\"\""),
                                                                                                         superUser),
                                                                                                  getClientState());
 
@@ -165,12 +176,12 @@ public class Cassandra41SystemAuthRoles implements SystemAuthRoles
     @Override
     public void syncGrantedRoles(final String userRoleName, final Set<String> desiredGrantedRoles, final Set<String> managedGrantedRoles)
     {
-        final Set<String> currentGrantedRoles = new LinkedHashSet<>(getRole(userRoleName, LOCAL_ONE).getMemberOf());
+        final Set<String> currentGrantedRoles = new LinkedHashSet<>(getRole(userRoleName, ConsistencyLevel.QUORUM).getMemberOf());
         final Set<String> currentManagedGrantedRoles = new LinkedHashSet<>(currentGrantedRoles);
         currentManagedGrantedRoles.retainAll(managedGrantedRoles);
 
         final Set<String> rolesToGrant = new LinkedHashSet<>(desiredGrantedRoles);
-        rolesToGrant.removeAll(currentManagedGrantedRoles);
+        rolesToGrant.removeAll(currentGrantedRoles);
 
         final Set<String> rolesToRevoke = new LinkedHashSet<>(currentManagedGrantedRoles);
         rolesToRevoke.removeAll(desiredGrantedRoles);
@@ -180,13 +191,13 @@ public class Cassandra41SystemAuthRoles implements SystemAuthRoles
             if (roleMissing(grantedRole))
             {
                 logger.warn("Unable to add user {} to Cassandra role {} because it doesn't exist.", userRoleName, grantedRole);
-                continue;
+                throw new IllegalStateException("Mapped Cassandra role does not exist: " + grantedRole);
             }
 
             logger.debug("Adding user {} to Cassandra role {}", userRoleName, grantedRole);
             final GrantRoleStatement grantRoleStmt = (GrantRoleStatement) QueryProcessor.getStatement(format(GRANT_ROLE_STATEMENT,
-                                                                                                             grantedRole,
-                                                                                                             userRoleName),
+                                                                                                             grantedRole.replace("'", "''"),
+                                                                                                             userRoleName.replace("'", "''")),
                                                                                                       getClientState());
 
             grantRoleStmt.execute(new QueryState(getClientState()),
@@ -204,8 +215,8 @@ public class Cassandra41SystemAuthRoles implements SystemAuthRoles
 
             logger.debug("Removing user {} from Cassandra role {}", userRoleName, revokedRole);
             final RevokeRoleStatement revokeRoleStmt = (RevokeRoleStatement) QueryProcessor.getStatement(format(REVOKE_ROLE_STATEMENT,
-                                                                                                               revokedRole,
-                                                                                                               userRoleName),
+                                                                                                               revokedRole.replace("'", "''"),
+                                                                                                               userRoleName.replace("'", "''")),
                                                                                                         getClientState());
 
             revokeRoleStmt.execute(new QueryState(getClientState()),
@@ -219,11 +230,12 @@ public class Cassandra41SystemAuthRoles implements SystemAuthRoles
                                               final Set<KeyspacePermissionGrant> desiredKeyspacePermissions,
                                               final Set<KeyspacePermissionGrant> managedKeyspacePermissions)
     {
-        final Set<KeyspacePermissionGrant> currentManagedPermissions = new LinkedHashSet<>(getGrantedKeyspacePermissions(userRoleName));
+        final Set<KeyspacePermissionGrant> currentPermissions = getGrantedKeyspacePermissions(userRoleName);
+        final Set<KeyspacePermissionGrant> currentManagedPermissions = new LinkedHashSet<>(currentPermissions);
         currentManagedPermissions.retainAll(managedKeyspacePermissions);
 
         final Set<KeyspacePermissionGrant> permissionsToGrant = new LinkedHashSet<>(desiredKeyspacePermissions);
-        permissionsToGrant.removeAll(currentManagedPermissions);
+        permissionsToGrant.removeAll(currentPermissions);
 
         final Set<KeyspacePermissionGrant> permissionsToRevoke = new LinkedHashSet<>(currentManagedPermissions);
         permissionsToRevoke.removeAll(desiredKeyspacePermissions);
@@ -239,7 +251,7 @@ public class Cassandra41SystemAuthRoles implements SystemAuthRoles
                                                          RoleResource.role(userRoleName));
             } catch (final Exception ex)
             {
-                logger.warn("Unable to grant {} to user {}.", permissionGrant, userRoleName, ex);
+                throw new IllegalStateException("Unable to grant " + permissionGrant + " to " + userRoleName, ex);
             }
         }
 
@@ -254,7 +266,7 @@ public class Cassandra41SystemAuthRoles implements SystemAuthRoles
                                                           RoleResource.role(userRoleName));
             } catch (final Exception ex)
             {
-                logger.warn("Unable to revoke {} from user {}.", permissionGrant, userRoleName, ex);
+                throw new IllegalStateException("Unable to revoke " + permissionGrant + " from " + userRoleName, ex);
             }
         }
     }
@@ -277,26 +289,25 @@ public class Cassandra41SystemAuthRoles implements SystemAuthRoles
         return ROW_TO_ROLE.apply(UntypedResultSet.create(rows.result).one());
     }
 
-    private Set<KeyspacePermissionGrant> getGrantedKeyspacePermissions(final String userRoleName)
+    Set<KeyspacePermissionGrant> getGrantedKeyspacePermissions(final String userRoleName)
     {
         final Set<KeyspacePermissionGrant> keyspacePermissions = new LinkedHashSet<>();
 
         try
         {
-            final Set<PermissionDetails> permissions = DatabaseDescriptor.getAuthorizer().list(getClientState().getUser(),
-                                                                                               Permission.ALL,
-                                                                                               null,
-                                                                                               RoleResource.role(userRoleName));
-
-            for (final PermissionDetails permissionDetails : permissions)
+            final UntypedResultSet permissions = QueryProcessor.execute(
+                "SELECT resource, permissions FROM system_auth.role_permissions WHERE role=?",
+                ConsistencyLevel.QUORUM, userRoleName);
+            for (final UntypedResultSet.Row row : permissions)
             {
-                if (permissionDetails.resource instanceof DataResource)
+                String resourceName = row.getString("resource");
+                if (resourceName.startsWith("data/"))
                 {
-                    final DataResource dataResource = (DataResource) permissionDetails.resource;
-                    if (dataResource.isKeyspaceLevel())
+                    final DataResource dataResource = DataResource.fromName(resourceName);
+                    if (dataResource.isKeyspaceLevel() && row.has("permissions"))
                     {
-                        keyspacePermissions.add(new KeyspacePermissionGrant(permissionDetails.permission.name(),
-                                                                           dataResource.getKeyspace()));
+                        for (String permission : row.getSet("permissions", UTF8Type.instance))
+                            keyspacePermissions.add(new KeyspacePermissionGrant(permission, dataResource.getKeyspace()));
                     }
                 }
             }

@@ -1,0 +1,23 @@
+ldap_uri: ldap://ldap:389/dc=example,dc=org
+ldap_service_dn: cn=admin,dc=example,dc=org
+ldap_service_password: admin
+ldap_filter_template: "(uid=%s)"
+auth_cache_enabled: true
+allow_empty_password: false
+cassandra_ldap_admin_user: cassandra
+consistency_for_role: QUORUM
+group_role_mappings:
+  - ldap_group_dn: cn=readers,dc=example,dc=org
+    cassandra_roles:
+      - reader_role
+      - grant: SELECT
+        keyspace: app
+  - ldap_group_dn: cn=writers,dc=example,dc=org
+    cassandra_roles:
+      - writer_role
+      - grant: ALL
+        keyspace: app
+  - ldap_group_dn: cn=missing,dc=example,dc=org
+    cassandra_roles:
+      - grant: SELECT
+        keyspace: app

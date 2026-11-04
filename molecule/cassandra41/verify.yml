@@ -1,0 +1,9 @@
+- name: Verify authentication and access lifecycle
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Run behavioral tests
+      ansible.builtin.command:
+        argv: ["{{ ansible_playbook_python }}", -m, pytest, -v, -s, "{{ playbook_dir }}/test_access.py", "--junitxml={{ playbook_dir }}/.state/results.xml"]
+      changed_when: false

@@ -232,6 +232,14 @@ public final class LdapConfiguration
             return null;
         }
 
-        return dn.trim().toLowerCase(Locale.ROOT);
+        try
+        {
+            javax.naming.ldap.LdapName name = new javax.naming.ldap.LdapName(dn.trim());
+            return new javax.naming.ldap.LdapName(name.getRdns()).toString().toLowerCase(Locale.ROOT);
+        }
+        catch (javax.naming.InvalidNameException ex)
+        {
+            throw new IllegalArgumentException("Invalid LDAP DN", ex);
+        }
     }
 }

@@ -1,0 +1,46 @@
+name: ldap41-integration
+x-cassandra: &cassandra
+  image: cassandra:4.1.10
+  entrypoint: ["/bin/bash", "/suite/start-cassandra.sh"]
+  environment:
+    CASSANDRA_CLUSTER_NAME: ldap41-integration
+    CASSANDRA_SEEDS: cassandra1
+    CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+    CASSANDRA_DC: datacenter1
+    MAX_HEAP_SIZE: 768M
+    HEAP_NEWSIZE: 128M
+  volumes:
+    - .:/suite:ro
+    - ../../cassandra-4.1/target/cassandra-ldap-4.1.10-1.1.0.jar:/opt/cassandra/lib/ldap-plugin.jar:ro
+  ports: ["127.0.0.1::9042"]
+  stop_grace_period: 30s
+services:
+  ldap:
+    image: osixia/openldap:1.5.0
+    platform: linux/amd64
+    environment:
+      LDAP_ORGANISATION: Integration
+      LDAP_DOMAIN: example.org
+      LDAP_ADMIN_PASSWORD: admin
+    ports: ["127.0.0.1::389"]
+  cassandra1:
+    <<: *cassandra
+    hostname: cassandra1
+    volumes:
+      - .:/suite:ro
+      - ../../cassandra-4.1/target/cassandra-ldap-4.1.10-1.1.0.jar:/opt/cassandra/lib/ldap-plugin.jar:ro
+      - data1:/var/lib/cassandra
+  cassandra2:
+    <<: *cassandra
+    hostname: cassandra2
+    volumes:
+      - .:/suite:ro
+      - ../../cassandra-4.1/target/cassandra-ldap-4.1.10-1.1.0.jar:/opt/cassandra/lib/ldap-plugin.jar:ro
+      - data2:/var/lib/cassandra
+volumes:
+  data1:
+  data2:
+networks:
+  default:
+    external: true
+    name: ldap41-integration_default

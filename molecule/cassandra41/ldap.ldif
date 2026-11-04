@@ -1,0 +1,25 @@
+dn: cn=alice,dc=example,dc=org
+objectClass: inetOrgPerson
+cn: alice
+sn: User
+uid: alice
+userPassword: test
+
+dn: cn=bob,dc=example,dc=org
+objectClass: inetOrgPerson
+cn: bob
+sn: User
+uid: bob
+userPassword: test
+
+dn: cn=readers,dc=example,dc=org
+objectClass: groupOfNames
+cn: readers
+member: cn=alice,dc=example,dc=org
+member: cn=admin,dc=example,dc=org
+
+dn: cn=writers,dc=example,dc=org
+objectClass: groupOfNames
+cn: writers
+member: cn=alice,dc=example,dc=org
+member: cn=admin,dc=example,dc=org

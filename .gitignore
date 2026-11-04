@@ -33,3 +33,7 @@ target
 *.iml
 
 .m2
+.venv-integration/
+molecule/cassandra41/.state/
+.pytest_cache/
+__pycache__/

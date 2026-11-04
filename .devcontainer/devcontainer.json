@@ -1,0 +1,13 @@
+{
+  "name": "LDAP Cassandra 4.1 integration",
+  "build": {
+    "dockerfile": "../molecule/cassandra41/Dockerfile",
+    "context": "../molecule/cassandra41"
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind",
+  "workspaceFolder": "${localWorkspaceFolder}",
+  "initializeCommand": "docker network inspect ldap41-integration_default >/dev/null 2>&1 || docker network create --label codex.task=ldap41-integration ldap41-integration_default",
+  "runArgs": ["--network", "ldap41-integration_default"],
+  "mounts": ["source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"],
+  "remoteUser": "root"
+}

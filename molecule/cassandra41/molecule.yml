@@ -1,0 +1,28 @@
+driver:
+  name: default
+platforms:
+  - name: ldap41-integration
+    managed: false
+provisioner:
+  name: ansible
+  playbooks:
+    create: create.yml
+    converge: converge.yml
+    destroy: destroy.yml
+verifier:
+  name: ansible
+scenario:
+  create_sequence:
+    - create
+  converge_sequence:
+    - create
+    - converge
+  destroy_sequence:
+    - destroy
+  test_sequence:
+    - destroy
+    - create
+    - converge
+    - idempotence
+    - verify
+    - destroy

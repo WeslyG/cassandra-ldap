@@ -59,7 +59,7 @@ public final class KeyspacePermissionGrant
             throw new IllegalArgumentException("Permission grant can not be empty.");
         }
 
-        return Permission.valueOf(grant.trim().toUpperCase()).name();
+        return Permission.valueOf(grant.trim().toUpperCase(java.util.Locale.ROOT)).name();
     }
 
     private static String normalizeKeyspace(final String keyspace)

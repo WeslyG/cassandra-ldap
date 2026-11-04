@@ -51,6 +51,20 @@ import org.slf4j.LoggerFactory;
 
 public class DefaultLDAPServer extends LDAPUserRetriever
 {
+    public static Set<String> lookupGroups(final String userDn, final LdapConfiguration configuration) throws Exception
+    {
+        try (LDAPInitialContext context = new LDAPInitialContext(configuration))
+        {
+            try
+            {
+                return context.findMatchingGroups(userDn, configuration.getMappedLdapGroupDns());
+            }
+            catch (javax.naming.NameNotFoundException ex)
+            {
+                return Collections.emptySet();
+            }
+        }
+    }
     private static final Logger logger = LoggerFactory.getLogger(DefaultLDAPServer.class);
 
     static class LDAPInitialContext implements AutoCloseable
@@ -82,6 +96,8 @@ public class DefaultLDAPServer extends LDAPUserRetriever
             ldapProperties.put(Context.PROVIDER_URL, ldapUri);
             ldapProperties.put(Context.SECURITY_PRINCIPAL, serviceDN);
             ldapProperties.put(Context.SECURITY_CREDENTIALS, servicePass);
+            ldapProperties.put("com.sun.jndi.ldap.connect.timeout", "2000");
+            ldapProperties.put("com.sun.jndi.ldap.read.timeout", "5000");
 
             this.rootLdapUri = parseRootLdapUri(ldapUri);
 
@@ -121,7 +137,7 @@ public class DefaultLDAPServer extends LDAPUserRetriever
         public String searchLdapDN(final String username) throws NamingException
         {
             final String filterTemplate = configuration.getLdapFilterTemplate();
-            final String filter = format(filterTemplate, username);
+            final String filter = format(filterTemplate, escapeFilterValue(username));
 
             logger.debug("User name is {}, going to use filter: {}", username, filter);
 
@@ -139,7 +155,7 @@ public class DefaultLDAPServer extends LDAPUserRetriever
 
                 final List<String> resolvedDns = new ArrayList<>();
 
-                if (answer.hasMore())
+                while (answer.hasMore() && resolvedDns.size() < 2)
                 {
                     SearchResult result = answer.next();
                     dn = result.getNameInNamespace();
@@ -189,6 +205,10 @@ public class DefaultLDAPServer extends LDAPUserRetriever
         public Set<String> findMatchingGroups(final String userDn, final Set<String> candidateGroupDns) throws NamingException
         {
             final Set<String> matchedGroupDns = new LinkedHashSet<>();
+            Attributes account = getAttributesWithFallback(userDn, new String[] { "userAccountControl" });
+            Attribute flags = account.get("userAccountControl");
+            if (flags != null && (Integer.parseInt(flags.get().toString()) & 2) != 0)
+                throw new javax.naming.AuthenticationException("LDAP account is disabled");
             final Set<String> userMemberOfGroups = getMemberOfGroups(userDn);
             final String normalizedUserDn = normalizeDn(userDn);
 
@@ -207,9 +227,9 @@ public class DefaultLDAPServer extends LDAPUserRetriever
                     {
                         matchedGroupDns.add(normalizedCandidateGroupDn);
                     }
-                } catch (final NamingException ex)
+                } catch (final javax.naming.NameNotFoundException ex)
                 {
-                    logger.warn("Unable to evaluate LDAP group {}, skipping it for user {}.", candidateGroupDn, userDn, ex);
+                    logger.warn("LDAP group {} does not exist, skipping it for user {}.", candidateGroupDn, userDn);
                 }
             }
 
@@ -240,15 +260,14 @@ public class DefaultLDAPServer extends LDAPUserRetriever
             return attributeContainsDn(attributes.get(GROUP_UNIQUE_MEMBER_ATTRIBUTE), normalizedUserDn);
         }
 
-        private Set<String> getMemberOfGroups(final String userDn)
+        private Set<String> getMemberOfGroups(final String userDn) throws NamingException
         {
             try
             {
                 final Attributes attributes = getAttributesWithFallback(userDn, new String[] { MEMBER_OF_ATTRIBUTE });
                 return attributeValuesAsNormalizedDns(attributes.get(MEMBER_OF_ATTRIBUTE));
-            } catch (final NamingException ex)
+            } catch (final javax.naming.directory.NoSuchAttributeException ex)
             {
-                logger.debug("Unable to read memberOf for {}", userDn, ex);
                 return Collections.emptySet();
             }
         }
@@ -304,9 +323,6 @@ public class DefaultLDAPServer extends LDAPUserRetriever
             {
                 rootContext = openRootContext();
                 return rootContext.context.getAttributes(dn, attributes);
-            } catch (final NamingException ex)
-            {
-                throw originalException;
             } finally
             {
                 if (rootContext != null)
@@ -354,7 +370,7 @@ public class DefaultLDAPServer extends LDAPUserRetriever
                     {
                         return "";
                     }
-                    return name.getPrefix(prefixSize).toString();
+                    return name.getSuffix(baseDn.size()).toString();
                 }
             } catch (final InvalidNameException ex)
             {
@@ -376,17 +392,7 @@ public class DefaultLDAPServer extends LDAPUserRetriever
                 return false;
             }
 
-            for (int i = 1; i <= base.size(); i++)
-            {
-                final String nameRdn = name.get(name.size() - i).toLowerCase(Locale.ROOT);
-                final String baseRdn = base.get(base.size() - i).toLowerCase(Locale.ROOT);
-                if (!nameRdn.equals(baseRdn))
-                {
-                    return false;
-                }
-            }
-
-            return true;
+            return name.startsWith(base);
         }
 
         private LdapName parseBaseDn(final String ldapUri)
@@ -507,6 +513,8 @@ public class DefaultLDAPServer extends LDAPUserRetriever
     @Override
     public User retrieve(User user) throws LDAPAuthFailedException
     {
+        if (user.getPassword() == null || user.getPassword().isEmpty())
+            throw new LDAPAuthFailedException(ExceptionCode.BAD_CREDENTIALS, "Empty password is not supported", null);
         try (final LDAPInitialContext context = new LDAPInitialContext(configuration))
         {
             final String ldapDn = context.searchLdapDN(user.getUsername());
@@ -554,6 +562,12 @@ public class DefaultLDAPServer extends LDAPUserRetriever
         }
     }
 
+    static String escapeFilterValue(final String value)
+    {
+        return value.replace("\\", "\\5c").replace("*", "\\2a")
+                    .replace("(", "\\28").replace(")", "\\29").replace("\u0000", "\\00");
+    }
+
     private Hashtable<String, String> getUserEnv(final String username,
                                                  final String password,
                                                  final String initialContextFactory,
@@ -567,6 +581,8 @@ public class DefaultLDAPServer extends LDAPUserRetriever
 
         env.put(Context.SECURITY_PRINCIPAL, username);
         env.put(Context.SECURITY_CREDENTIALS, password);
+        env.put("com.sun.jndi.ldap.connect.timeout", "2000");
+        env.put("com.sun.jndi.ldap.read.timeout", "5000");
 
         return env;
     }

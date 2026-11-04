@@ -1,0 +1,30 @@
+- name: Create isolated integration cluster
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Initialize test state
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/.state"
+        state: directory
+        mode: '0755'
+    - name: Select bootstrap authentication
+      ansible.builtin.copy:
+        content: bootstrap
+        dest: "{{ playbook_dir }}/.state/mode"
+        force: false
+        mode: '0600'
+    - name: Install fixture policy
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/ldap.yaml"
+        dest: "{{ playbook_dir }}/.state/ldap.yaml"
+        force: false
+        mode: '0644'
+    - name: Start LDAP and seed before the joining node
+      ansible.builtin.command:
+        argv: [docker, compose, -f, "{{ playbook_dir }}/compose.yaml", up, -d, ldap, cassandra1]
+      changed_when: true
+    - name: Start the joining Cassandra node
+      ansible.builtin.command:
+        argv: [docker, compose, -f, "{{ playbook_dir }}/compose.yaml", up, -d, cassandra2]
+      changed_when: true

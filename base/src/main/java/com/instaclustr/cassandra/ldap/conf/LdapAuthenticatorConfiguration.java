@@ -179,7 +179,7 @@ public final class LdapAuthenticatorConfiguration
     {
         try (FileInputStream input = new FileInputStream(configurationFile))
         {
-            final Object loaded = new Yaml().load(input);
+            final Object loaded = new Yaml(new org.yaml.snakeyaml.constructor.SafeConstructor()).load(input);
 
             if (loaded == null)
             {

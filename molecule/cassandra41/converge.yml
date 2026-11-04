@@ -1,0 +1,10 @@
+- name: Provision schema and enable plugin
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Bootstrap and deploy plugin
+      ansible.builtin.command:
+        argv: ["{{ ansible_playbook_python }}", "{{ playbook_dir }}/harness.py", converge]
+      register: deployment
+      changed_when: "'DEPLOYED' in deployment.stdout"

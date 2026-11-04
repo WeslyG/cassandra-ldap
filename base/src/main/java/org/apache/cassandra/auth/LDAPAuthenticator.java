@@ -117,6 +117,7 @@ public class LDAPAuthenticator extends AbstractLDAPAuthenticator
                            parseBoolean(properties.getProperty(CASSANDRA_AUTH_CACHE_ENABLED_PROP)));
 
         allow_empty_password = parseBoolean(properties.getProperty(ALLOW_EMPTY_PASSWORD_PROP));
+        systemAuthRoles.startSynchronization(configuration);
 
         logger.info("{} was initialised", LDAPAuthenticator.class.getName());
     }
@@ -140,12 +141,15 @@ public class LDAPAuthenticator extends AbstractLDAPAuthenticator
     {
         try
         {
-            if (!allow_empty_password && password.isEmpty())
+            if (password == null || password.isEmpty())
                 throw new AuthenticationException("empty password is not supported");
 
             final User user = new User(username, password);
 
-            final User cachedUser = cacheDelegate.get(user);
+            User cachedUser = cacheDelegate.get(user);
+            // Refresh LDAP identity and groups before synchronizing authorization.
+            if (cachedUser != null && cachedUser.getLdapDN() != null)
+                cachedUser = new DefaultLDAPUserRetriever(hasher, configuration).retrieve(user);
 
             // authenticate will be called if we're not in cache, subsequently loading the cache for the given user.
             if (cachedUser != null && cachedUser.getPassword() != null)
@@ -164,7 +168,10 @@ public class LDAPAuthenticator extends AbstractLDAPAuthenticator
                     // don't spam incorrect passwords (or let others spam them for your user).
 
                     cacheDelegate.invalidate(user);
-                    cacheDelegate.get(user);
+                    cachedUser = cacheDelegate.get(user);
+                    if (cachedUser == null || cachedUser.getPassword() == null
+                        || !hasher.checkPasswords(password, cachedUser.getPassword()))
+                        throw new AuthenticationException("invalid username/password");
                 }
                 
                 if (cachedUser.getLdapDN() != null)
@@ -174,12 +181,7 @@ public class LDAPAuthenticator extends AbstractLDAPAuthenticator
                         systemAuthRoles.createRole(cachedUser.getLdapDN(), false);
                     }
 
-                    systemAuthRoles.syncGrantedRoles(cachedUser.getLdapDN(),
-                                                     configuration.resolveGrantedRoles(cachedUser.getLdapGroupDns()),
-                                                     configuration.getManagedCassandraRoles());
-                    systemAuthRoles.syncGrantedKeyspacePermissions(cachedUser.getLdapDN(),
-                                                                  configuration.resolveGrantedKeyspacePermissions(cachedUser.getLdapGroupDns()),
-                                                                  configuration.getManagedKeyspacePermissionGrants());
+                    systemAuthRoles.synchronizeLdapUser(cachedUser.getLdapDN(), configuration);
                 }
 
                 final String loginName = cachedUser.getLdapDN() == null ? cachedUser.getUsername() : cachedUser.getLdapDN();
