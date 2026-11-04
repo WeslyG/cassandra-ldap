@@ -91,6 +91,7 @@ public abstract class LegacyCassandraLDAPAuthenticator extends AbstractLDAPAuthe
 
         credentialsLoadingFunction = new CredentialsLoadingFunction(cassandraUserRetriever::retrieve,
                                                                     ldapUserRetriever::retrieve);
+        systemAuthRoles.startSynchronization(configuration);
 
         logger.info("{} was initialised", LegacyCassandraLDAPAuthenticator.class.getName());
 
@@ -101,6 +102,8 @@ public abstract class LegacyCassandraLDAPAuthenticator extends AbstractLDAPAuthe
     {
         try
         {
+            if (loginPassword == null || loginPassword.isEmpty())
+                throw new AuthenticationException("empty password is not supported");
             final User user = new User(username, loginPassword);
 
             final User retrievedUser = credentialsLoadingFunction.apply(user);
@@ -110,10 +113,7 @@ public abstract class LegacyCassandraLDAPAuthenticator extends AbstractLDAPAuthe
                 if (!hasher.checkPasswords(loginPassword, retrievedUser.getPassword()))
                 {
 
-                    if (user.getLdapDN() == null)
-                    {
-                        throw new AuthenticationException("invalid username/password");
-                    }
+                    throw new AuthenticationException("invalid username/password");
                 }
 
                 if (retrievedUser.getLdapDN() != null)
@@ -123,12 +123,7 @@ public abstract class LegacyCassandraLDAPAuthenticator extends AbstractLDAPAuthe
                         systemAuthRoles.createRole(retrievedUser.getLdapDN(), false);
                     }
 
-                    systemAuthRoles.syncGrantedRoles(retrievedUser.getLdapDN(),
-                                                     configuration.resolveGrantedRoles(retrievedUser.getLdapGroupDns()),
-                                                     configuration.getManagedCassandraRoles());
-                    systemAuthRoles.syncGrantedKeyspacePermissions(retrievedUser.getLdapDN(),
-                                                                  configuration.resolveGrantedKeyspacePermissions(retrievedUser.getLdapGroupDns()),
-                                                                  configuration.getManagedKeyspacePermissionGrants());
+                    systemAuthRoles.synchronizeLdapUser(retrievedUser.getLdapDN(), configuration);
                 }
 
                 final String loginName = retrievedUser.getLdapDN() == null ? retrievedUser.getUsername() : retrievedUser.getLdapDN();

@@ -1,254 +1,239 @@
-# Instaclustr LDAP Authenticator
+= LDAP Authenticator for Apache Cassandra
+:toc:
+:toclevels: 2
 
-_LDAP Authenticator for Apache Cassandra_
+This plugin authenticates Cassandra clients against LDAP and synchronizes access
+from direct LDAP group membership. Mappings grant Cassandra role memberships and
+direct keyspace permissions. An ownership journal supports revocation without
+adopting unrelated manual assignments.
 
-image:https://circleci.com/gh/instaclustr/cassandra-ldap.svg?style=svg["Instaclustr",link="https://circleci.com/gh/instaclustr/cassandra-ldap"]
+== Supported adapters
 
-- Website: https://www.instaclustr.com/
-- Documentation: https://www.instaclustr.com/support/documentation/
-
-This is a pluggable authentication implementation for Apache Cassandra, providing a way to authenticate
-and create users based on a configured LDAP server. This implementation provides authentication only.
-Role management must be performed through the usual Cassandra role management— CassandraAuthorizer.
-See **How it works** for more details.
-
-## Deprecation note
-
-By releasing of Cassandra 5.0, the Cassandra team has stopped to actively develop / support Cassandra versions
-3.0 and 3.11. We keep the source code of respective 3.0 and 3.11 modules in the repository, but they are
-commented out from main `pom.xml` as they require Java 8 but Cassandra 5.0 requires Java 11 and the testing framework we use for running embedded Cassandra can not deal with Java 11 while testing Cassandra 3.x even we set source and target for Maven to 1.8. If you want to build 3.x modules, please be sure you run Java 8 and you build only the respective module you want.
-
-## Project Structure and Building
-
-This project consists of 5 modules; the `base` module is the module on which all other implementation modules
-depend. It contains core implementation which is necessary as all concrete modules are reusing it.
-
-The `base` module depends on Cassandra dependency—version 3.0.18 but its scope is `provided` as
-these classes will be present when such plugin as a whole is put on a class path of Cassandra in runtime.
-
-There are five implementation modules:
-
-* cassandra-2.2 - builds against version 2.2.19
-* cassandra-3.0 - builds against version 3.0.31
-* cassandra-3.11 - builds against version 3.11.18
-* cassandra-4.0 - builds against version 4.0.16
-* cassandra-4.1 - builds aganist version 4.1.10
-* cassandra-5.0 - builds aganist version 5.0.6
-
-Project is built as:
-
-```
-$ mvn clean install
-```
-
-This does _not_ invoke integration tests. For integration tests to run, please specify `it` profile:
-
-```
-$ mvn clean install -Pit
-```
-
-Integration tests will expect a Docker installation to be present (or a way to connect to one). There
-is a Docker container started with the LDAP server running against which an integration test, per module,
-is started.
-
-## Configuration of Plugins
-
-After build, the respective JAR to place to Cassandra `CLASSPATH` (e.g. by placing it to `libs` directory
-of Cassandra installation) is located in the `target` directory of each build as `casandra-ldap-{c* version}.jar`.
-This JAR already contains artifacts from `base` so you do not need to take care of it-one JAR is enough.
-You may at most probably use a plugin built against a respective version for other Cassandra
-versions of the same minor release, so you might use 3.11.8 plugin for 3.11.4, for example.
-
-The configuration is driven by a YAML file and system properties which you need to start Cassandra with
-to point that plugin to a configuration file.
-
-The system property is `-Dcassandra.ldap.config.file=/path/to/ldap.yaml`. If
-not set, it will try to resolve `$CASSANDRA_CONF/ldap.yaml`.
-
-The content of the configuration file is as follows:
-
-
+[cols="1,1,1,2",options="header"]
 |===
-|property name |explanation
-
-|ldap_uri
-|Ldap server URI. Specify ldaps when using a secure LDAP port (strongly recommended), example: `ldap://127.0.0.1:389/dc=example,dc=org`
-
-|ldap_context_factory
-|defaults to `com.sun.jndi.ldap.LdapCtxFactory`
-
-|ldap_service_dn
-|Service user distinguished name. This user will be a SUPERUSER and be used for looking up user details on authentication, example: `cn=admin,dc=example,dc=org`
-
-|ldap_service_password
-|Service user password
-
-|ldap_filter_template
-|template for searching in LDAP, explanation further in this readme, defaults to `(cn=%s)`
-
-|group_role_mappings
-|YAML list of LDAP group to Cassandra targets. `cassandra_roles` may contain role names and/or keyspace permission objects with `grant` and `keyspace`. A user can log in only if they match at least one configured LDAP group. The plugin grants missing Cassandra roles and keyspace permissions and revokes stale managed entries during sync.
-
-|auth_cache_enabled
-|relevant for Cassandra 3.11 and 4.0 plugins, defaults to `false`
-
-|consistency_for_role
-|consistency level to use for retrieval of a role to check if it can log in - defaults to LOCAL_ONE
-
-|auth_bcrypt_gensalt_log2_rounds
-|number of rounds to hash passwords
-
-|load_ldap_service
-|defaults to false, if it is true, SPI mechanism will look on class path to load custom implementation of `LDAPUserRetriever`.
-
-|cassandra_ldap_admin_user
-|name of a user/role which will be considered a default superuser, instead of `cassandra`. Please consult "How it Works" section to know more about the usage.
-
-|allow_empty_password
-|allow or disallow empty passwords when trying to connect to ldap server to prevent insecure behavior, defaults to `true`
+|Module |Cassandra |Plugin artifact version |Authenticator
+|cassandra-2.2 |2.2.19 |1.0.0 |Cassandra22LDAPAuthenticator
+|cassandra-3.0 |3.0.31 |1.0.0 |Cassandra30LDAPAuthenticator
+|cassandra-3.11 |3.11.18 |1.0.0 |LDAPAuthenticator
+|cassandra-4.0 |4.0.16 |1.0.0 |LDAPAuthenticator
+|cassandra-4.1 |4.1.10 |1.1.0 |LDAPAuthenticator
+|cassandra-5.0 |5.0.6 |1.0.0 |LDAPAuthenticator
 |===
 
+Compatibility is tested against these exact releases. Compatibility with other
+patch releases requires testing; support for an adapter does not imply upstream
+security support for its Cassandra release.
 
-## Configuration of Cassandra
+== Build and test
 
-If is *strongly* recommended to use `NetworkTopologyStrategy` for your `system_auth keyspace`.
+Docker with Compose v2, Bash, Make and network access to image/Maven registries
+are required for the container-based commands:
 
-Please be sure that `system_auth` keyspace uses `NetworkTopologyStrategy` with number of replicas equal to number of nodes in DC. If it is not
-the case, you can alter your keyspace as follows:
+[source,shell]
+----
+make build-all
+make test-unit
+make check-docs
+make integration-all
+----
 
-    ALTER KEYSPACE system_auth WITH replication = {'class': 'NetworkTopologyStrategy', 'dc1': '3'}  AND durable_writes = true;
+* `build-all` packages all six plugins using Maven 3.9.9 and Java 17.
+* `test-unit` runs the 10 focused policy, LDAP-security and CQL-escaping tests.
+* `check-docs` checks configuration examples/defaults, module versions, local links and test counts without live services.
+* `integration-all` builds, runs unit/documentation checks, then tests all adapters in real clusters.
 
-After this, repair `system_auth` keyspace so it all propagates to other nodes.
+The build uses the public Maven Central Google mirror configured in
+link:.mvn/matrix-settings.xml[the Maven settings]. It contains no credentials.
+Each deployable jar is
+`cassandra-<module>/target/cassandra-ldap-<cassandra-version>-<plugin-version>.jar`.
+Use that shaded jar, not an `original-*.jar`, and do not install a separate base jar.
 
-You need to restart your cluster in a rolling fashion. For each node, you need to add one of these configurations
-into `cassandra.yaml` for each node:
+For a local 4.1 build, install a compatible JDK and configure `JAVA_HOME` or put
+`java` on `PATH`, then use `make build-4.1`. `make clean-4.1` removes the base
+and 4.1 build directories. Container builds do not require a host JDK.
+Runtime Java comes from the Cassandra installation, not the Java 17 build image.
 
-### Cassandra 2.2
+See link:molecule/cassandra41/README.md[Testing] for topology, commands, coverage,
+reports, failure diagnosis and the 2.2 test-runtime details.
 
-```
-authenticator: Cassandra22LDAPAuthenticator
-role_manager: LDAPCassandraRoleManager
-authorizer: CassandraAuthorizer
-```
+== Installation
 
-### Cassandra 3.0
+. Keep a working native Cassandra superuser available for administration and recovery.
+. Configure suitable `NetworkTopologyStrategy` replication for `system_auth` and
+  a dedicated `ldap_auth` keyspace in every DC. Repair after replication changes.
+. Apply link:conf/access-sync-schema.cql[the journal schema] as a database administrator.
+  Ordinary LDAP users must not be able to modify `ldap_auth`.
+. Create all referenced Cassandra roles and keyspaces. A missing mapped role or
+  keyspace rejects synchronization; the plugin does not create mapped roles.
+. Install the matching shaded plugin jar in Cassandra's `lib` directory on every
+  node. Remove other versions of the same plugin from the classpath.
+. Install identical LDAP YAML policies and configure authentication on every node.
+. Restart nodes in rolling order, checking role operations as well as CQL connectivity.
 
-```
-authenticator: Cassandra30LDAPAuthenticator
-role_manager: LDAPCassandraRoleManager
-authorizer: CassandraAuthorizer
-```
+For 3.11, 4.0, 4.1 and 5.0, `cassandra.yaml` contains:
 
-### Cassandra 3.11 - 4.x
-
-```
+[source,yaml]
+----
 authenticator: LDAPAuthenticator
 authorizer: CassandraAuthorizer
 role_manager: LDAPCassandraRoleManager
-```
+----
 
-For 3.11 and 4, configure credential caching parameters in `cassandra.yaml` if necessary and if you want
-that cache to be enabled (as per configuration parameters). [Re]start Cassandra.
+For 2.2 use `Cassandra22LDAPAuthenticator`; for 3.0 use
+`Cassandra30LDAPAuthenticator`. The authorizer and role manager are the same.
 
-## Example
+On 4.1 and 5.0 also configure:
 
-For fast testing there is Debian OpenLDAP Docker container
+[source,yaml]
+----
+auth_write_consistency_level: QUORUM
+auth_read_consistency_level: QUORUM
+----
 
-    docker run -e LDAP_ADMIN_PASSWORD=admin --rm -d -p 389:389 --name ldap1 osixia/openldap
+Do not add unsupported settings to older Cassandra releases. Their adapters
+repeat validated native auth mutations at QUORUM. The journal always uses QUORUM.
+See link:ACCESS_SYNC.md[Access synchronization] for consistency and recovery rules.
 
-The `ldap.yaml` file in the `conf` directory does not need to be changed, and with the above `docker run` it will work out of the box. You just
-have to put it in `$CASSANDRA_CONF` or set respective configuration property as described above.
+Configure client-to-Cassandra TLS and LDAPS with a trusted directory certificate.
+The SASL mechanism transports a username and password; it does not supply transport
+encryption itself. The example domain and credentials are not deployment settings.
 
-## Explanation of ldap_filter_template property
+== LDAP configuration
 
-`ldap_filter_template` property is by default `(cn=%s)` where `%s` will be replaced by name you want to log in with.
-For example if you do `cqlsh -u myuserinldap`, a search filter for LDAP will be `(cn=myuserinldap)`. You
-may have a different search filter based on your need, a lot of people use e.g. SAM or something similar.
-If you try to log in with `cqlsh -u cn=myuserinldap`, there will be no replacement done and this will be
-used as a search filter instead.
+Pass an absolute path to the YAML file in the node's JVM options:
 
-## How it Works
+[source,shell]
+----
+JVM_OPTS="$JVM_OPTS -Dcassandra.ldap.config.file=/etc/cassandra/ldap.yaml"
+----
 
-LDAPAuthenticator currently supports plain text authorization requests only in the form of a username and password.
-This request is made to the LDAP server over plain text, so you should be using client encryption on the Cassandra
-side and secure ldap (ldaps) on the LDAP side.
+The loader first tries the property path, or `./ldap.yaml` if the property is
+unset. If that file is unreadable, it tries `$CASSANDRA_CONF/ldap.yaml`.
+An unreadable explicit path can therefore fall back to the environment location;
+verify the chosen path in the startup log. A missing, empty or invalid file
+prevents startup. YAML is read with SnakeYAML SafeConstructor from Cassandra's
+classpath; the plugin does not bundle another SnakeYAML jar.
 
-Credentials are sent from your client to the Cassandra server and then tested against the LDAP server for
-authentication using a specified service account. This service account should be configured in the `ldap.yaml`
-file using the `ldap_service_dn` and `ldap_service_password` properties. If `ldap_service_dn` is set, such a role will be created in database,
-when not already present, upon node's start.
+link:conf/ldap.yaml[Example configuration]:
 
-`ldap_service_dn` account, which will be automatically created, will be superuser in Cassandra.
+[source,yaml]
+----
+ldap_uri: ldaps://ldap.example.org:636/dc=example,dc=org
+ldap_service_dn: cn=ldap-service,dc=example,dc=org
+ldap_service_password: REPLACE_WITH_SECRET
+ldap_filter_template: "(uid=%s)"
 
-All "normal" roles are not affected - they behave exactly as you are used to.
+auth_cache_enabled: true
+allow_empty_password: false
 
-If the LDAP server connection is lost or there is another communication error while talking to LDAP server,
-the operator still has a possibility of logging in via `cassandra` user as usual, and until the LDAP server is not back again;
-Users meant to be authenticated against the LDAP server will not be able to log in but all "normal" users will be able to
-log in and the disruption of LDAP communication will not affect their ability to do so as they live in Cassandra natively.
+cassandra_ldap_admin_user: cassandra
+consistency_for_role: LOCAL_ONE
 
-In case a user specifies just `test` as login name (or any other name, for that matter), it will try to
-authenticate against database first and if not successful against LDAP using filter `ldap_filter_template` which defaults to `(cn=%s)`
-
-It is possible to delete administration role (e.g. role `cassandra`) but if one does that, all administration operations are only able to
-be done via LDAP account. In case LDAP is down, the operator would not have any control over DB as `cassandra` is not present anymore.
-In such case, it is recommended to create another admin-like user with a strong password _before_ the `cassandra` role is deleted. A plugin is internally creating new roles
-when somebody from LDAP logs in and it is not in DB yet. For this functionality, there needs to be some admin-like user which writes them `system_auth.roles` table.
-If you delete `cassandra` user, there is suddenly not such user. You have to restart node and specify this property:
-
-    -Dcassandra.ldap.admin.user=dba
-
-Where `dba` is _new_ superuser which is able to write to `system_auth.roles` and acts as Cassandra admin.
-
-Upon login via LDAP user, this plugin will create a dummy role just to be able to play as a normal Cassandra role
-with all its permissions and so on. Passwords for LDAP users are not stored in Cassandra, obviously.
-
-Credentials are cached for implementations for Cassandra 3.11 and 4.0 so that way we are not hitting LDAP server
-all the time when there is a lot of login attempts with same login name. An administrator can increase
-relevant validity settings in `cassandra.yaml` to increase these periods even more.
-
-## SPI for LDAP server implementations (advanced)
-
-In order to talk to a LDAP server, there is `DefaultLDAPServer` class in `base` module which all modules are using.
-However, it might not be enough - there is a lot of LDAP servers out there and their internals and configuration
-might render the default implementation incompatible. If you have special requirements, you might provide your
-own implementation by implementing `LDAPUserRetriever`. You have to have `load_ldap_service` set to `true` as well.
-
-To tell LDAP plugin to use your implementation, you need to create a file in `src/main/resources/META-INF/services`
-called `LDAPUserRetriever` and the content of that file needs to
-be just one line - the fully qualified class name (with package) of your custom implementation.
-
-After you build such plugin, the SPI mechanism upon plugin's initialisation during Cassandra node startup
-will pick up your custom LDAP server connection / authentication logic.
-
-## LDAP Group To Cassandra Role Sync
-
-LDAP access is controlled by `group_role_mappings`. A user must match at least one configured LDAP group to log in.
-For every successful LDAP authentication, the plugin calculates the union of Cassandra roles mapped from the user's LDAP
-groups and synchronizes the user's managed Cassandra role memberships by granting missing roles and revoking stale ones.
-
-Keyspace permissions can be managed in the same mapping block:
-
-```yaml
 group_role_mappings:
   - ldap_group_dn: cn=cassandra-users,dc=example,dc=org
     cassandra_roles:
       - analyst_role
       - grant: SELECT
-        keyspace: system
+        keyspace: app
       - grant: ALL
-        keyspace: testkeyspace_1
-```
+        keyspace: app_archive
+  - ldap_group_dn: cn=cassandra-readonly-users,dc=example,dc=org
+    cassandra_roles:
+      - readonly_role
+      - grant: SELECT
+        keyspace: app
+----
 
-This produces Cassandra grants equivalent to:
+LDAP connection fields are flat top-level keys. Secret deployment can therefore
+manage `ldap_service_password` independently without inserting an indented block.
+The loader does not interpolate environment variables or decrypt vault values:
+deployment tooling must render the final YAML. Restrict file permissions, use
+Ansible Vault or a secret store, and suppress secret-task output/diffs. Do not
+commit rendered production YAML.
 
-```sql
-GRANT SELECT ON KEYSPACE system TO 'cn=bill,dc=example,dc=org';
-GRANT ALL ON KEYSPACE testkeyspace_1 TO 'cn=bill,dc=example,dc=org';
-```
+[cols="2,1,4",options="header"]
+|===
+|Key |Default |Meaning
+|ldap_uri |Required |LDAP/LDAPS URI, including the search base DN.
+|ldap_service_dn |Required |Directory bind identity used for user/group lookup.
+|ldap_service_password |Required |Nonempty directory bind password.
+|ldap_filter_template |(cn=%s) |Search filter; login values are escaped before substitution.
+|group_role_mappings |Required |Nonempty list of group DNs and Cassandra targets.
+|ldap_context_factory |com.sun.jndi.ldap.LdapCtxFactory |JNDI context factory.
+|auth_cache_enabled |true |Credential-cache setting on 3.11 through 5.0; never bypasses a fresh LDAP credential check.
+|allow_empty_password |true |Accepted configuration field; empty client passwords are always rejected regardless of its value.
+|auth_bcrypt_gensalt_log2_rounds |10 |Local bcrypt cost for retrieved credentials; choose an integer from 4 through 31.
+|consistency_for_role |LOCAL_ONE |Role-manager lookup consistency, not the journal/write consistency.
+|cassandra_ldap_admin_user |cassandra |Existing native administrator used for internal role operations.
+|load_ldap_service |false |Use a classpath ServiceLoader implementation of LDAPUserRetriever for credential retrieval.
+|===
 
-If such managed permission disappears from the mapping, the plugin will revoke it on the next synchronized authentication.
+`-Dcassandra.ldap.admin.user=<role>` overrides `cassandra_ldap_admin_user`.
+The administrator must exist, be able to log in and have adequate privileges.
+Choosing a name here does not promote an ordinary role to superuser.
 
-## Further Information
-- See blog by Stefan Miklosovic about https://www.instaclustr.com/the-instaclustr-ldap-plugin-for-cassandra/[Apache Cassandra LDAP Authentication]
-- Please see https://www.instaclustr.com/support/documentation/announcements/instaclustr-open-source-project-status/[Instaclustr support status] of this project
+WARNING: The role manager creates a Cassandra SUPERUSER role named after
+`ldap_service_dn` if that role does not exist. Protect the bind credentials and
+review whether that identity belongs to any login-eligible LDAP group. This is
+separate from ordinary LDAP user roles, which are created with LOGIN=true,
+SUPERUSER=false and no stored native password.
+
+== Authentication and authorization
+
+A native role with a stored password is checked against Cassandra. An incorrect
+native password is rejected; it is not accepted as an LDAP fallback. When native
+credentials are unavailable, the plugin searches LDAP, requires one matching
+entry and verifies its password with an LDAP bind. A login is never interpreted
+as a raw LDAP filter.
+
+LDAP users log in with a username, but their Cassandra identity is the resolved
+full LDAP DN. That DN appears in role/user listings and is used for grants.
+A Cassandra role is both a possible login identity and a permission container:
+a LOGIN=false role can hold privileges and be granted to a LOGIN=true user role.
+
+Direct groups are resolved from user `memberOf` and group `member`/`uniqueMember`
+attributes. A nonexistent configured group DN is skipped; other directory errors
+fail the login. Nested groups and AD primary-group expansion are not supported.
+A user must match at least one configured group.
+
+The desired access is the union of all matching mappings. Duplicate memberships
+and permissions collapse into sets. A string target names an existing Cassandra
+role; an object target grants a permission on a named keyspace. `ALL` expands to
+the permissions applicable to keyspaces in that Cassandra version; it is not
+passed to the Permission enum. It includes powerful permissions such as AUTHORIZE,
+so prefer explicit least-privilege targets.
+
+After credential verification the plugin re-reads groups under a cluster-wide
+lock, journals assignments it owns, revokes stale owned access and grants missing
+desired access. An operational error rejects the login. Native manual grants
+are preserved unless the journal already identifies the assignment as LDAP-owned.
+Do not manage the same assignment manually and through LDAP.
+
+A background worker also reconciles journaled users, allowing revocation after
+group removal or LDAP user deletion without another login. Revocation is bounded
+by reconciliation and Cassandra cache delays, not instantaneous. LDAP outages
+preserve recorded rights and reject new LDAP logins; native administrators remain
+available. See link:ACCESS_SYNC.md[the operational guide] for policy transitions,
+lock recovery, AD limitations and ownership migration.
+
+== Extension points
+
+The `base` module contains configuration, directory lookup and synchronization.
+Version modules supply service-provider adapters for Cassandra's execution API.
+Do not ship more than one version adapter on a node.
+
+A custom credential retriever extends
+`com.instaclustr.cassandra.ldap.auth.LDAPUserRetriever` and is registered in
+`META-INF/services/com.instaclustr.cassandra.ldap.auth.LDAPUserRetriever`.
+Enable `load_ldap_service` to use it. Group reconciliation still uses the built-in
+DefaultLDAPServer lookup; a custom retriever alone does not replace that path.
+
+== Repository hygiene
+
+The credentials in `molecule/cassandra41` and Java test resources are disposable
+fixtures for `example.org` or loopback services. They are not production secrets.
+Build outputs, local Maven caches and raw integration reports are ignored by Git.
+Reports may contain local paths, node addresses and synthetic DNs; review and
+redact them before sharing outside the test environment.
+
+The project is licensed under link:LICENSE[Apache License 2.0].

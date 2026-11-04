@@ -10,9 +10,9 @@
 
     <modules>
         <module>base</module>
-<!--        <module>cassandra-2.2</module>-->
-<!--        <module>cassandra-3.0</module>-->
-<!--        <module>cassandra-3.11</module>-->
+        <module>cassandra-2.2</module>
+        <module>cassandra-3.0</module>
+        <module>cassandra-3.11</module>
         <module>cassandra-4.0</module>
         <module>cassandra-4.1</module>
         <module>cassandra-5.0</module>
@@ -58,7 +58,7 @@
     </distributionManagement>
 
     <properties>
-        <maintainer>Stefan Miklosovic &lt;stefan.miklosovic@instaclustr.com&gt;</maintainer>
+        <maintainer>Cassandra LDAP Maintainers &lt;maintainers@example.org&gt;</maintainer>
         <maven.javadoc.plugin.version>3.1.1</maven.javadoc.plugin.version>
         <maven.source.plugin.version>3.1.0</maven.source.plugin.version>
         <maven.gpg.plugin.version>1.6</maven.gpg.plugin.version>
@@ -79,6 +79,12 @@
 
     <build>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>${maven.jar.plugin.version}</version>
+                <configuration><forceCreation>true</forceCreation></configuration>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-deploy-plugin</artifactId>

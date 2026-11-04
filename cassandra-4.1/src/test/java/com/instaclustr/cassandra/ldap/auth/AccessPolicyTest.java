@@ -44,6 +44,6 @@ public class AccessPolicyTest
     @Test public void journalEncodingPreservesExactKeyspace()
     {
         KeyspacePermissionGrant grant = new KeyspacePermissionGrant("SELECT", "CaseSensitive:Keyspace");
-        assertEquals(Cassandra41AccessSync.decode(Cassandra41AccessSync.encode(grant)), grant);
+        assertEquals(LdapAccessSync.decode(LdapAccessSync.encode(grant)), grant);
     }
 }

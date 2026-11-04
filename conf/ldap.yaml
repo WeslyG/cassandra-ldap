@@ -1,10 +1,10 @@
-ldap_uri: ldap://127.0.0.1:389/dc=example,dc=org
-ldap_service_dn: cn=admin,dc=example,dc=org
-ldap_service_password: admin
-ldap_filter_template: "(cn=%s)"
+ldap_uri: ldaps://ldap.example.org:636/dc=example,dc=org
+ldap_service_dn: cn=ldap-service,dc=example,dc=org
+ldap_service_password: REPLACE_WITH_SECRET
+ldap_filter_template: "(uid=%s)"
 
 auth_cache_enabled: true
-allow_empty_password: true
+allow_empty_password: false
 
 cassandra_ldap_admin_user: cassandra
 consistency_for_role: LOCAL_ONE
@@ -14,11 +14,11 @@ group_role_mappings:
     cassandra_roles:
       - analyst_role
       - grant: SELECT
-        keyspace: system
+        keyspace: app
       - grant: ALL
-        keyspace: testkeyspace_1
+        keyspace: app_archive
   - ldap_group_dn: cn=cassandra-readonly-users,dc=example,dc=org
     cassandra_roles:
       - readonly_role
       - grant: SELECT
-        keyspace: system
+        keyspace: app

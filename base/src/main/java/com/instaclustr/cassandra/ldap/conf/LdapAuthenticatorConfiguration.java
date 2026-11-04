@@ -179,7 +179,7 @@ public final class LdapAuthenticatorConfiguration
     {
         try (FileInputStream input = new FileInputStream(configurationFile))
         {
-            final Object loaded = new Yaml(new org.yaml.snakeyaml.constructor.SafeConstructor()).load(input);
+            final Object loaded = safeYaml().load(input);
 
             if (loaded == null)
             {
@@ -203,6 +203,23 @@ public final class LdapAuthenticatorConfiguration
                                                     ex.getMessage()),
                                              ex);
         }
+    }
+
+    private Yaml safeYaml()
+    {
+        try
+        {
+            Class<?> type = Class.forName("org.yaml.snakeyaml.constructor.SafeConstructor");
+            Object constructor;
+            try { constructor = type.getConstructor().newInstance(); }
+            catch (NoSuchMethodException ex)
+            {
+                Class<?> options = Class.forName("org.yaml.snakeyaml.LoaderOptions");
+                constructor = type.getConstructor(options).newInstance(options.getConstructor().newInstance());
+            }
+            return new Yaml((org.yaml.snakeyaml.constructor.BaseConstructor) constructor);
+        }
+        catch (ReflectiveOperationException ex) { throw new IllegalStateException("Unable to initialize safe YAML parser", ex); }
     }
 
     private List<GroupRoleMapping> parseGroupRoleMappings(final Object rawMappings, final File configurationFile) throws ConfigurationException

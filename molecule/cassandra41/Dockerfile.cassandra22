@@ -1,0 +1,14 @@
+FROM --platform=linux/amd64 cassandra:2.2.19 AS distribution
+
+FROM cassandra:3.0.31 AS runtime
+
+# Use a native Java 8 runtime/entrypoint, but only Cassandra 2.2 server binaries.
+FROM runtime
+USER root
+RUN rm -rf /opt/cassandra /etc/cassandra
+COPY --from=distribution /opt/cassandra/ /opt/cassandra/
+COPY --from=distribution /etc/cassandra/ /etc/cassandra/
+# JNA 4.0.0 has no aarch64 JNI library. Keep the native runtime's JNA instead.
+RUN rm /opt/cassandra/lib/jna-4.0.0.jar
+COPY --from=runtime /opt/cassandra/lib/jna-4.2.2.jar /opt/cassandra/lib/jna-4.2.2.jar
+ENV CASSANDRA_VERSION=2.2.19

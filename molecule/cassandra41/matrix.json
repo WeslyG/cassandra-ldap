@@ -1,0 +1,8 @@
+{
+  "2.2": {"version": "2.2.19", "plugin_version": "1.0.0", "image": "ldap-integration-cassandra:2.2.19", "authenticator": "Cassandra22LDAPAuthenticator"},
+  "3.0": {"version": "3.0.31", "plugin_version": "1.0.0", "authenticator": "Cassandra30LDAPAuthenticator"},
+  "3.11": {"version": "3.11.18", "plugin_version": "1.0.0", "authenticator": "LDAPAuthenticator"},
+  "4.0": {"version": "4.0.16", "plugin_version": "1.0.0", "authenticator": "LDAPAuthenticator"},
+  "4.1": {"version": "4.1.10", "plugin_version": "1.1.0", "authenticator": "LDAPAuthenticator"},
+  "5.0": {"version": "5.0.6", "plugin_version": "1.0.0", "authenticator": "LDAPAuthenticator"}
+}

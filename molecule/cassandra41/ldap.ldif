@@ -1,3 +1,4 @@
+# Disposable integration identities; passwords below are public test fixtures.
 dn: cn=alice,dc=example,dc=org
 objectClass: inetOrgPerson
 cn: alice

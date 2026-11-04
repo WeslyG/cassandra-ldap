@@ -1,3 +1,4 @@
+# Disposable directory fixtures for embedded Java tests; never deploy these accounts.
 dn: cn=bill,dc=example,dc=org
 uid: bill
 cn: bill

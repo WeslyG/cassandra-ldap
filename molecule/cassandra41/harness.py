@@ -21,9 +21,12 @@ STATE = HERE / '.state'
 DN = 'cn=alice,dc=example,dc=org'
 
 
-def compose(*args, input=None, check=True):
-    return subprocess.run(['docker', 'compose', '-f', str(HERE / 'compose.yaml'), *args],
-                          input=input, text=True, capture_output=True, check=check)
+def compose(*args, input=None, check=True, timeout=600):
+    result = subprocess.run(['docker', 'compose', '-f', str(HERE / 'compose.yaml'), *args],
+                            input=input, text=True, capture_output=True, timeout=timeout)
+    if check and result.returncode:
+        raise RuntimeError(f'Docker Compose {args} failed ({result.returncode}):\n{result.stdout}\n{result.stderr}')
+    return result
 
 
 def port(node):
@@ -61,7 +64,18 @@ def eventually(fn, timeout=240):
 
 def ready(node):
     with connection(node) as session:
-        assert session.execute('SELECT release_version FROM system.local').one()
+        release = session.execute('SELECT release_version FROM system.local').one().release_version
+        expected = os.environ.get('CASSANDRA_VERSION')
+        if expected:
+            assert release == expected, (node, release, expected)
+        # Older servers open native transport before CassandraRoleManager is ready.
+        # SELECT alone cannot establish that GRANT/REVOKE operations are available.
+        session.execute('CREATE ROLE IF NOT EXISTS ldap_readiness_probe')
+        session.execute('ALTER ROLE ldap_readiness_probe WITH LOGIN = false')
+        evidence = STATE / 'server-versions.json'
+        versions = json.loads(evidence.read_text()) if evidence.exists() else {}
+        versions[node] = release
+        evidence.write_text(json.dumps(versions, indent=2) + '\n')
 
 
 def ldap_modify(ldif):
@@ -82,7 +96,7 @@ def fingerprint(config):
             if isinstance(target, str):
                 entries.append(dn + '\0role\0' + target)
             else:
-                grants = ['CREATE', 'ALTER', 'DROP', 'SELECT', 'MODIFY', 'AUTHORIZE'] if target['grant'] == 'ALL' else [target['grant']]
+                grants = json.loads((STATE / 'permission-names.json').read_text()) if target['grant'] == 'ALL' else [target['grant']]
                 for grant in grants:
                     encoded = grant + ':' + base64.b64encode(target['keyspace'].encode()).decode()
                     entries.append(dn + '\0permission\0' + encoded)
@@ -122,10 +136,10 @@ def converge():
     eventually(seed_ldap)
     with connection() as session:
         statements = [
-            "ALTER KEYSPACE system_auth WITH replication = {'class':'NetworkTopologyStrategy','datacenter1':2}",
-            "CREATE KEYSPACE IF NOT EXISTS ldap_auth WITH replication = {'class':'NetworkTopologyStrategy','datacenter1':2}",
-            "CREATE KEYSPACE IF NOT EXISTS app WITH replication = {'class':'NetworkTopologyStrategy','datacenter1':2}",
-            "CREATE KEYSPACE IF NOT EXISTS manual WITH replication = {'class':'NetworkTopologyStrategy','datacenter1':2}",
+            "ALTER KEYSPACE system_auth WITH replication = {'class':'NetworkTopologyStrategy','datacenter1':'2'}",
+            "CREATE KEYSPACE IF NOT EXISTS ldap_auth WITH replication = {'class':'NetworkTopologyStrategy','datacenter1':'2'}",
+            "CREATE KEYSPACE IF NOT EXISTS app WITH replication = {'class':'NetworkTopologyStrategy','datacenter1':'2'}",
+            "CREATE KEYSPACE IF NOT EXISTS manual WITH replication = {'class':'NetworkTopologyStrategy','datacenter1':'2'}",
             "CREATE TABLE IF NOT EXISTS app.records (id int PRIMARY KEY, value text)",
             "INSERT INTO app.records (id,value) VALUES (1,'fixture')",
             "CREATE ROLE IF NOT EXISTS reader_role",
@@ -134,12 +148,20 @@ def converge():
         ]
         for statement in statements:
             session.execute(statement)
+        session.execute('CREATE ROLE IF NOT EXISTS permission_probe')
+        session.execute('GRANT ALL ON KEYSPACE app TO permission_probe')
+        permissions = session.execute("SELECT permissions FROM system_auth.role_permissions WHERE role='permission_probe' AND resource='data/app'").one().permissions
+        (STATE / 'permission-names.json').write_text(json.dumps(sorted(permissions)))
+        session.execute('DROP ROLE permission_probe')
         schema = (HERE / '../../conf/access-sync-schema.cql').resolve().read_text()
         schema = '\n'.join(line for line in schema.splitlines() if not line.startswith('--'))
         for statement in schema.split(';'):
             if statement.strip():
                 session.execute(statement)
-    compose('exec', '-T', 'cassandra1', 'nodetool', 'repair', 'system_auth')
+    # Cassandra 2.2's NodeProbe brackets IPv4 literals, rejected by recent Java 8.
+    # Use a valid IPv4-mapped IPv6 literal instead of weakening JNDI URL parsing.
+    host = ['-h', '::ffff:127.0.0.1'] if os.environ.get('CASSANDRA_VERSION', '').startswith('2.2.') else []
+    compose('exec', '-T', 'cassandra1', 'nodetool', *host, 'repair', '-full', '-seq', 'system_auth')
     (STATE / 'mode').write_text('plugin')
     for node in ['cassandra1', 'cassandra2']:
         compose('restart', node)
@@ -150,6 +172,13 @@ def converge():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['converge'])
-    parser.parse_args()
-    converge()
+    parser.add_argument('action', choices=['converge', 'ready-seed'])
+    args = parser.parse_args()
+    if args.action == 'ready-seed':
+        eventually(lambda: ready('cassandra1'))
+        # Keep the original admin replica in the replica set when node 2 joins.
+        # Otherwise RF=1 can move its partition to a node with no auth data yet.
+        with connection() as session:
+            session.execute("ALTER KEYSPACE system_auth WITH replication = {'class':'NetworkTopologyStrategy','datacenter1':'2'}")
+    else:
+        converge()

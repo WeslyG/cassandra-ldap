@@ -1,0 +1,16 @@
+- name: Preserve cluster evidence before teardown
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Collect logs from both Cassandra nodes and LDAP
+      ansible.builtin.command:
+        argv: [docker, compose, -f, "{{ playbook_dir }}/compose.yaml", logs, --no-color]
+      register: cluster_logs
+      changed_when: false
+      failed_when: false
+    - name: Save per-version cluster logs
+      ansible.builtin.copy:
+        content: "{{ cluster_logs.stdout }}\n{{ cluster_logs.stderr }}"
+        dest: "{{ playbook_dir }}/.state/{{ lookup('env', 'CASSANDRA_VERSION') | default('current', true) }}-containers.log"
+        mode: '0644'

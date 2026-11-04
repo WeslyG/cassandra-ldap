@@ -62,8 +62,12 @@ def test_04_group_removal_revokes_and_preserves_manual():
             assert direct_permissions()['data/app'] == {'SELECT'}
             assert memberships() == {'reader_role', 'manual_role'}
             assert direct_permissions()['data/manual'] == {'SELECT'}
-            with pytest.raises(Unauthorized):
+            try:
                 existing.execute("INSERT INTO app.records (id,value) VALUES (3,'forbidden')")
+            except Unauthorized:
+                return
+            # pytest.raises emits BaseException on failure, bypassing eventually.
+            raise AssertionError('Existing session still has cached MODIFY permission')
         eventually(assert_revoked, 90)
 
 

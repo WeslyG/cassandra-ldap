@@ -3,35 +3,21 @@ jobs:
   build:
     machine:
       image: ubuntu-2204:2024.05.1
-
     working_directory: ~/cassandra-ldap
-
-    environment:
-      MAVEN_OPTS: -Xmx3200m
-      JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
-
     steps:
-
       - checkout
-
-      - restore_cache:
-          keys:
-            - m2-{{ checksum "pom.xml" }}
-
-      - save_cache:
-          paths:
-            - ~/.m2
-          key: m2-{{ checksum "pom.xml" }}
-
-      - run: sudo apt-get update && sudo apt install openjdk-11-jdk
-      - run: mvn --version && whereis java && mvn clean install -Dversion.cassandra4=4.0.16 -Dversion.cassandra41=4.1.10 -Dversion.cassandra50=5.0.6
-
-      - persist_to_workspace:
-          root: ~/cassandra-ldap
-          paths:
-            - "cassandra-4.0/target/cassandra-ldap-4.0*.jar"
-            - "cassandra-4.1/target/cassandra-ldap-4.1*.jar"
-            - "cassandra-5.0/target/cassandra-ldap-5.0*.jar"
+      - run:
+          name: Build all plugins, check docs and test real clusters
+          command: make integration-all
+          no_output_timeout: 40m
+      - store_test_results:
+          path: molecule/cassandra41/.state/reports
+      - store_artifacts:
+          path: molecule/cassandra41/.state/reports
+          destination: cluster-reports
+      - store_artifacts:
+          path: cassandra-4.1/target/surefire-reports
+          destination: unit-reports
 
   build-4-0:
     machine:

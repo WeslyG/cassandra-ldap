@@ -1,52 +1,167 @@
-# Cassandra 4.1 access synchronization
+# Access Synchronization Operations
 
-Provision a dedicated `ldap_auth` keyspace using NetworkTopologyStrategy with
-replication appropriate for every DC, then apply `conf/access-sync-schema.cql`
-before starting the new plugin. Only database administrators may access it.
-Configure `auth_write_consistency_level: QUORUM` (or ALL) in cassandra.yaml.
-Repair system_auth and ldap_auth after changing replication.
+## Provisioning
 
-The plugin records direct memberships and keyspace permissions it adds. Existing
-manual assignments are preserved and are not adopted automatically. An assignment
-must not be managed both manually and through LDAP. To migrate previous plugin
-assignments, audit them and seed the ownership journal before enabling sync;
-otherwise they will be treated as manual. Permission journal entries use
-`PERMISSION:BASE64_UTF8_KEYSPACE`. Do not put passwords in these tables.
+Keep an existing native superuser available independently of LDAP. Give
+system_auth and ldap_auth suitable NetworkTopologyStrategy replication in every
+DC, with enough replicas/live nodes for QUORUM. The following is an example for
+a three-node DC named dc1, not a universal replication setting:
 
-On authentication, LDAP credentials are checked again. Groups are read again
-under a cluster-wide LWT lock; the ownership journal is written before grants.
-Revokes precede grants, and failed operations reject the login. The journal is
-retained on partial failure so the next reconciliation can retry. A daemon runs
-every 60 seconds (first run after 10 seconds) over journaled users. Removing all
-groups or deleting a user therefore revokes journaled grants without a new login.
-LDAP failures leave rights unchanged and are logged. Only direct group membership
-is supported; nested AD groups and AD primary-group membership are not expanded.
-Disabled AD accounts are rejected explicitly. Their journaled grants currently
-require operator revocation: background lookup treats disabled-account errors
-as failures rather than as proof of an empty group set.
+```sql
+ALTER KEYSPACE system_auth WITH replication = {'class':'NetworkTopologyStrategy','dc1':'3'};
+CREATE KEYSPACE ldap_auth WITH replication = {'class':'NetworkTopologyStrategy','dc1':'3'};
+```
 
-The first node registers a deterministic policy fingerprint. Other policies are
-rejected, preventing mixed configurations from issuing competing grants. For a
-policy change, activate the new fingerprint with a conditional update of the
-coordinator's `policy` column using `IF owner=null`. Retry if a sync is active.
-Old-policy nodes then reject LDAP synchronization. Deploy identical YAML and
-restart nodes in rolling order, waiting for each node to become ready. Keep a
-native database administrator available during this transition. The integration
-harness demonstrates this procedure in `change_policy`.
-The fingerprint excludes the service password so secret rotation is independent.
+Replace the DC/RF with the actual topology. Apply
+[conf/access-sync-schema.cql](conf/access-sync-schema.cql) as an administrator,
+and repair keyspaces after replication changes. The schema file creates tables,
+not the keyspace. Do not give LDAP-managed users write access to ldap_auth.
+Create mapped roles/keyspaces before enabling the plugin.
 
-The global lock intentionally has no TTL. A crashed or timed-out owner blocks
-later LDAP synchronization. Inspect `SELECT * FROM ldap_auth.coordinator`, stop
-the previous owner process (all plugin nodes if ownership is uncertain), then
-clear `owner` with a conditional update matching the observed UUID. Never clear
-a live owner's lock. Automatic expiry would permit a paused JVM to resume writes
-concurrently with another owner. Local database administration remains available.
+The service bind DN is also used as the name of an automatically created
+Cassandra SUPERUSER role. Protect that directory identity and its password.
+Ordinary LDAP users get separate DN-named LOGIN=true, SUPERUSER=false roles
+without native password hashes. Mapped permission-container roles are
+operator-created and may have LOGIN=false.
 
-Revocation is not instantaneous: LDAP replication, the reconciliation interval,
-the number of users, and Cassandra permission/role caches contribute to delay.
-An already running query is not cancelled. For urgent removal, perform the revoke
-as an administrator and invalidate the relevant caches on every node. Open
-connections must be included in deployment validation.
+On 4.1 and 5.0 configure auth_write_consistency_level as QUORUM or ALL; a weaker
+value prevents synchronization startup. QUORUM auth reads are also recommended.
+Do not add unsupported settings on 2.2, 3.0, 3.11 or 4.0. Those adapters execute
+Cassandra's validated native authorization statements, then repeat the relevant
+auth-table and index mutations at QUORUM before releasing the synchronization
+lock. Shared journal/assignment reads and writes use QUORUM on every adapter.
 
-This implementation requires two-node integration validation before production.
-Do not interpret a successful package build as evidence of distributed correctness.
+## Journal and Ownership
+
+The operator-provisioned tables are:
+
+| Table | Purpose |
+|---|---|
+| ldap_auth.coordinator | Singleton id='global' with active policy fingerprint and optional owner UUID |
+| ldap_auth.assignments | Per-user-role sets of owned memberships and direct keyspace permissions |
+
+Permission entries are `PERMISSION:BASE64_UTF8_KEYSPACE`; the base64 value is
+encoding, not encryption. DNs/role names identify users, so restrict access to
+these tables and their backups. Never store passwords there.
+
+The plugin owns only assignments it adds or assignments already recorded in its
+journal. A manually existing desired grant is preserved without being adopted.
+If LDAP and an operator manage the same exact assignment, ownership cannot be
+inferred from Cassandra's grant alone. Choose one owner for each assignment.
+
+To adopt existing access, audit actual grants and seed only the intended
+ownership entries while synchronization is stopped. Preserve unrelated manual
+grants. Do not erase the journal or coordinator to force a policy change:
+doing so loses ownership or locking information.
+
+## Reconciliation
+
+After LDAP credential verification, the plugin checks the policy and acquires
+a global, cluster-wide LWT lock. It re-reads direct group membership under that
+lock, unions matching mappings, validates referenced roles/keyspaces and records
+ownership before granting anything. It revokes stale owned access before adding
+desired grants. A failure rejects the login and leaves journal information for
+a later retry; synchronization is not one atomic transaction across all auth rows.
+
+Lock acquisition waits for up to eight seconds with short randomized backoff.
+An uncertain CAS result is resolved with a SERIAL owner read before auth writes.
+The lock is shared by all users and plugin nodes, so synchronization is serialized;
+login throughput and background work must be load-tested for the real deployment.
+
+Each node schedules reconciliation over journaled users with an initial delay
+of 10 seconds and a fixed delay of 60 seconds after each pass. Runtime of the pass
+and lock contention add to the delay. Removing a user's final group or deleting
+the LDAP user therefore revokes owned grants without another successful login.
+Native/manual grants are retained.
+
+A nonexistent configured group object is skipped. Other directory failures are
+not treated as proof of lost membership: LDAP outages preserve permissions,
+are logged, and reject new LDAP authentication. Native administration remains
+available when the required Cassandra replicas are reachable.
+
+Direct memberOf and group member/uniqueMember lookups are supported. Nested and
+AD primary groups are not expanded. Disabled AD accounts are denied, but their
+background lookup raises an error rather than returning an authoritative empty
+group set. Their owned grants require operator revocation; do not assume an AD
+disable operation alone revokes permissions from an existing CQL session.
+
+## Policy Changes
+
+The active policy is a deterministic SHA-256 fingerprint, including LDAP URI,
+filter, service DN, normalized group mappings and expanded target permissions.
+The bind password is excluded so secret rotation does not change the policy.
+All nodes must use the same logical policy.
+
+A node with another fingerprint rejects synchronization. A startup mismatch
+reports its candidate fingerprint in the log. Obtain that fingerprint from the
+candidate configuration using the same plugin/server version; do not hash raw
+YAML bytes or reuse the integration fixture's hard-coded assumptions.
+
+1. Retain native administrator access and stage the candidate YAML on one node.
+   A mismatching candidate fails synchronization startup and reports its fingerprint.
+2. Read the current coordinator policy/owner using a native administrator.
+3. Activate the candidate with a conditional update matching both the observed
+   old policy and an empty owner. Inspect the applied result; if false, investigate
+   or retry rather than treating it as success.
+4. Install identical YAML on all nodes and restart them in rolling order,
+   waiting for role operations to be ready. Restart the candidate node too.
+5. Verify new and existing-session access, owned revokes, preserved manual grants
+   and background reconciliation.
+
+Illustrative CQL (replace the two fingerprint placeholders):
+
+```sql
+SELECT * FROM ldap_auth.coordinator WHERE id='global';
+UPDATE ldap_auth.coordinator
+SET policy='<candidate-fingerprint>'
+WHERE id='global'
+IF owner=null AND policy='<observed-current-fingerprint>';
+```
+
+Use appropriate QUORUM/SERIAL consistency for administration. An in-progress
+sync blocks activation. Nodes with the old policy reject LDAP synchronization
+after activation instead of racing to re-grant old access. The test harness's
+change_policy function demonstrates a fixture policy transition, not a
+general-purpose production fingerprint tool.
+
+## Lock Recovery
+
+The global lock deliberately has no TTL. A process crash or an uncertain release
+can leave an owner recorded, blocking subsequent LDAP synchronization. Automatic
+expiration would let a paused process resume writes after another owner acquires
+the same lock.
+
+1. Inspect the owner UUID and logs. Do not clear a lock just because it is old.
+2. Stop the previous writer process. If its identity is uncertain, stop every
+   plugin-enabled Cassandra process that might still perform reconciliation.
+3. Bring sufficient nodes up with native PasswordAuthenticator,
+   CassandraRoleManager and CassandraAuthorizer, without LDAP synchronization
+   workers, if necessary to obtain a recovery quorum and native admin connection.
+4. Clear only the exact observed UUID with a conditional update and inspect
+   the applied result. Never issue an unconditional owner=null update.
+5. Restore the plugin/configuration, roll nodes and verify reconciliation.
+
+For example, substitute the observed UUID in this statement:
+
+```sql
+UPDATE ldap_auth.coordinator
+SET owner=null
+WHERE id='global'
+IF owner=11111111-1111-1111-1111-111111111111;
+```
+
+The UUID in the example is synthetic, not a reusable recovery token. Do not
+clear a live owner's lock. Ownership uncertainty is an operational incident,
+not permission to start a competing writer.
+
+## Revocation and Validation
+
+Cassandra permission/role caches, directory replication, reconciliation interval,
+number of users and lock contention contribute to revocation latency. A running
+query is not cancelled. For urgent revocation perform the administrative revoke
+and invalidate relevant caches on every node, and verify existing connections.
+
+[The integration guide](molecule/cassandra41/README.md) documents the two-node
+OpenLDAP matrix, actual permission checks, idempotence, jar hashes and reports.
+Those tests do not validate AD-specific behavior, multi-DC operation, TLS setup,
+production load or every in-flight crash/network ordering.

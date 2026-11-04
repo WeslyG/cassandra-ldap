@@ -37,3 +37,18 @@ target
 molecule/cassandra41/.state/
 .pytest_cache/
 __pycache__/
+
+# Local deployment secrets and workstation files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+conf/ldap.local*.yaml
+secrets/
+.DS_Store
+Thumbs.db

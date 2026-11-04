@@ -9,12 +9,9 @@ import org.apache.cassandra.service.ClientState;
 
 public interface SystemAuthRoles {
 
-    default void startSynchronization(com.instaclustr.cassandra.ldap.conf.LdapConfiguration configuration) { }
+    void startSynchronization(com.instaclustr.cassandra.ldap.conf.LdapConfiguration configuration);
 
-    default void synchronizeLdapUser(String userRoleName, com.instaclustr.cassandra.ldap.conf.LdapConfiguration configuration)
-    {
-        throw new UnsupportedOperationException("LDAP synchronization is implemented only for Cassandra 4.1");
-    }
+    void synchronizeLdapUser(String userRoleName, com.instaclustr.cassandra.ldap.conf.LdapConfiguration configuration);
 
     boolean roleMissing(String dn);
 

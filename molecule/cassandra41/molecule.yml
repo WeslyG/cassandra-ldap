@@ -9,6 +9,7 @@ provisioner:
     create: create.yml
     converge: converge.yml
     destroy: destroy.yml
+    cleanup: cleanup.yml
 verifier:
   name: ansible
 scenario:
@@ -25,4 +26,5 @@ scenario:
     - converge
     - idempotence
     - verify
+    - cleanup
     - destroy
