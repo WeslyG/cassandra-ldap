@@ -3,7 +3,7 @@
 Each release lists changes relative to its predecessor. Installation, configuration
 and operational limits are documented in the linked guides, not repeated here.
 
-## 1.4.0 - 2026-11-05
+## 1.4.0 - 2026-11-06
 
 ### Security
 
