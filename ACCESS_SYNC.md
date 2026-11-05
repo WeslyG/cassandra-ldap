@@ -100,22 +100,33 @@ YAML bytes or reuse the integration fixture's hard-coded assumptions.
 1. Retain native administrator access and stage the candidate YAML on one node.
    A mismatching candidate fails synchronization startup and reports its fingerprint.
 2. Read the current coordinator policy/owner using a native administrator.
-3. Activate the candidate with a conditional update matching both the observed
-   old policy and an empty owner. Inspect the applied result; if false, investigate
-   or retry rather than treating it as success.
+3. Reserve an idle coordinator with a fresh maintenance UUID, conditional on
+   the observed old policy. Activate the candidate conditional on that same
+   maintenance owner and old policy. Inspect both applied results.
 4. Install identical YAML on all nodes and restart them in rolling order,
    waiting for role operations to be ready. Restart the candidate node too.
-5. Verify new and existing-session access, owned revokes, preserved manual grants
+5. Release only the maintenance UUID after all nodes recover. Verify new and
+   existing-session access, owned revokes, preserved manual grants
    and background reconciliation.
 
-Illustrative CQL (replace the two fingerprint placeholders):
+Illustrative CQL (replace the fingerprint placeholders and use the same freshly
+generated UUID for all three statements; release only after the rolling restart):
 
 ```sql
 SELECT * FROM ldap_auth.coordinator WHERE id='global';
 UPDATE ldap_auth.coordinator
-SET policy='<candidate-fingerprint>'
+SET owner=<fresh-maintenance-uuid>
 WHERE id='global'
 IF owner=null AND policy='<observed-current-fingerprint>';
+UPDATE ldap_auth.coordinator
+SET policy='<candidate-fingerprint>'
+WHERE id='global'
+IF owner=<fresh-maintenance-uuid> AND policy='<observed-current-fingerprint>';
+-- Restart/recover all nodes before releasing the maintenance owner.
+UPDATE ldap_auth.coordinator
+SET owner=null
+WHERE id='global'
+IF owner=<fresh-maintenance-uuid>;
 ```
 
 Use appropriate QUORUM/SERIAL consistency for administration. An in-progress
@@ -123,6 +134,24 @@ sync blocks activation. Nodes with the old policy reject LDAP synchronization
 after activation instead of racing to re-grant old access. The test harness's
 change_policy function demonstrates a fixture policy transition, not a
 general-purpose production fingerprint tool.
+
+## Planned Maintenance
+
+The Java background worker has no coordinated stop/drain API. A node or service
+restart during synchronization can interrupt a writer or its QUORUM unlock and
+leave a persistent owner. A rolling restart by itself does not prevent this.
+
+Before planned restarts, use a native administrator to reserve the coordinator
+with a fresh controller UUID using LWT `IF owner=null`. Proceed only after an
+applied result, or a SERIAL read proving ownership after an uncertain CAS reply.
+An existing owner must finish or undergo the separate recovery procedure; never
+overwrite it. Keep this reservation through the restart window, then release it
+conditionally with `IF owner=<your-maintenance-uuid>` after recovery.
+
+This pauses LDAP synchronization and can reject new LDAP logins while held;
+native administration remains available. It is an explicit operator procedure,
+not automatic crash recovery. Preserve the controller UUID and do not clear
+someone else's owner if a maintenance command fails.
 
 ## Lock Recovery
 

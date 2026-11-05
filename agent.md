@@ -21,7 +21,7 @@ contract, not a changelog.
   systemd/Ansible deployment and rotation; `ACCESS_SYNC.md`: operational rules;
   `molecule/integration/README.md`: test commands, coverage and limitations.
 - `RELEASING.md`, `scripts/package_release.py` and `.github/workflows/release.yml`:
-  clean-tag, single-invocation verification gates and nine public release assets.
+  clean-tag, fast verification gates and nine public release assets.
 
 The shared base compiles against provided Cassandra 3.0.31 and Java 8 bytecode.
 Do not introduce newer JDK APIs into it. Cassandra API differences belong in the
@@ -64,6 +64,7 @@ use only trusted code and disposable credentials.
 
 ```sh
 make build-all
+make verify-fast
 make test-unit
 make test-release
 make check-docs
@@ -76,7 +77,9 @@ LDAP_TEST_SYSTEMD=true bash molecule/integration/run.sh matrix 3.0 5.0
 Java integration scaffolding. Maven packaging must force jar recreation so shaded
 outputs cannot retain stale classes. Never rebuild an artifact during its e2e run.
 
-For runtime/shared-code changes run the full six-version matrix. For a version-only
+Cluster E2E is local-only. Never add it to GitHub Actions or CircleCI; CI uses
+`make verify-fast` without a Docker socket in check containers. For runtime/shared-code
+changes run the full six-version matrix locally. For a version-only
 adapter change run at least its real-cluster scenario plus unit tests, and explain
 what was not rerun. Require idempotence, 15/15 access and 8/8 systemd secret cases,
 zero skips, both actual server
@@ -89,6 +92,12 @@ run as real systemd services with encrypted credentials in a disposable privileg
 container. Never substitute a fake CREDENTIALS_DIRECTORY for that verification.
 The boot script uses `mount --make-rshared /` inside the private container mount
 namespace only. Never apply it to the host or mount host credential/cgroup trees.
+
+Use the harness maintenance context around planned node/service restarts. It
+reserves only an idle coordinator, resolves uncertain CAS replies using SERIAL,
+and releases only its own controller UUID. Never clear an orphaned plugin owner
+to make a test pass. The plugin has no automatic graceful worker drain; document
+the production restart/lock-recovery limitation separately from test coordination.
 
 Clusters share a fixed project/network/runner name and must run sequentially.
 Seed auth RF=2 precedes node 2 joining; perform full repair before enabling the
@@ -126,9 +135,11 @@ by assumption. Never commit an unrelated user's change without inspecting it.
 ## Releases
 
 Keep all Maven and matrix artifact versions aligned with the stable release tag.
-Run the full matrix from the clean release commit; do not combine selective runs
-or reuse evidence after rebuilding jars. Run `make test-release` and package only
-after the Java unit report and all six live-cluster reports pass.
+Run appropriate E2E locally and investigate failures. Release CI builds all jars
+and runs only unit, packaging and documentation checks. Packaging requires a clean
+tagged source, correct jar structure/versions and a passing fresh Java unit report;
+it neither requires nor imports local E2E reports. Do not claim that CI-built bytes
+passed local E2E or fabricate cluster pass counters in manifests/release notes.
 The package must not contain raw logs, XML, workstation paths or real secrets.
 Never repoint a published tag or replace published assets. GitHub publication
 runs separately from Docker verification with contents-write permission scoped

@@ -39,9 +39,10 @@ make integration-all
 
 * `build-all` packages all six plugins using Maven 3.9.9 and Java 17.
 * `test-unit` runs 18 focused policy, LDAP-security, secret-source and CQL-escaping tests.
-* `test-release` runs 12 isolated tests of artifact packaging and evidence guards.
+* `test-release` runs 16 packaging tests and 5 isolated maintenance-coordination tests without live services.
+* `verify-fast` builds all six adapters and runs unit, packaging and documentation checks without starting a cluster. GitHub Actions and CircleCI use this target.
 * `check-docs` checks configuration examples/defaults, module versions, local links and test counts without live services.
-* `integration-all` (also `integration-systemd`) builds, runs unit/packaging/documentation checks, then tests all adapters in real clusters under systemd with encrypted credentials. It uses disposable privileged test containers; run only on a trusted Docker host.
+* `integration-all` (also `integration-systemd`) runs the full local matrix under real systemd with encrypted credentials. It uses disposable privileged test containers; run only on a trusted Docker host. CI does not run this target.
 
 The build uses the public Maven Central Google mirror configured in
 link:.mvn/matrix-settings.xml[the Maven settings]. It contains no credentials.
@@ -60,7 +61,8 @@ Download the matching shaded jar from
 https://github.com/WeslyG/cassandra-ldap/releases[GitHub Releases], or use the
 complete ZIP bundle with all adapters, configuration and installation guidance.
 Each release includes SHA256SUMS and a manifest tying the files to one clean
-source commit and a complete six-version cluster test run. Install only one
+source commit, built jar hashes and fast CI checks. Cluster E2E runs locally;
+release CI does not claim that its rebuilt bytes passed a cluster run. Install only one
 adapter jar per node. Verify checksums before deployment.
 
 For maintainers, link:RELEASING.md[the release guide] describes versioning,

@@ -9,12 +9,14 @@ import pathlib
 import subprocess
 import time
 import socket
+import uuid
 
 import yaml
 from cassandra.cluster import Cluster
 from cassandra.auth import PlainTextAuthProvider
 from cassandra.policies import WhiteListRoundRobinPolicy
 from cassandra import ConsistencyLevel
+from cassandra.query import SimpleStatement
 
 HERE = pathlib.Path(__file__).resolve().parent
 STATE = HERE / '.state'
@@ -108,18 +110,45 @@ def fingerprint(config):
     return base64.b64encode(digest.digest()).decode()
 
 
-def change_policy(config):
-    # CAS prevents a policy transition during an active synchronization.
-    def activate():
+@contextlib.contextmanager
+def maintenance():
+    # Reserve an idle coordinator; never steal an existing writer's ownership.
+    owner = uuid.uuid4()
+    def reserve():
         with connection() as session:
-            row = session.execute("UPDATE ldap_auth.coordinator SET policy=%s WHERE id='global' IF owner=null",
-                                  (fingerprint(config),)).one()
+            try:
+                row = session.execute("UPDATE ldap_auth.coordinator SET owner=%s WHERE id='global' IF owner=null",
+                                      (owner,)).one()
+                if row.applied:
+                    return
+            except Exception:
+                # Resolve a lost CAS reply before retrying or entering maintenance.
+                pass
+            row = session.execute(SimpleStatement(
+                "SELECT owner FROM ldap_auth.coordinator WHERE id='global'",
+                consistency_level=ConsistencyLevel.SERIAL)).one()
+            assert row and row.owner == owner, 'Coordinator belongs to another writer'
+    eventually(reserve)
+    try:
+        yield owner
+    finally:
+        with connection() as session:
+            row = session.execute("UPDATE ldap_auth.coordinator SET owner=null WHERE id='global' IF owner=%s",
+                                  (owner,)).one()
+            assert row.applied, 'Maintenance ownership changed; refusing to clear another owner'
+
+
+def change_policy(config):
+    # Keep background writers out of their critical section while nodes restart.
+    with maintenance() as owner:
+        with connection() as session:
+            row = session.execute("UPDATE ldap_auth.coordinator SET policy=%s WHERE id='global' IF owner=%s",
+                                  (fingerprint(config), owner)).one()
             assert row.applied
-    eventually(activate)
-    (STATE / 'ldap.yaml').write_text(yaml.safe_dump(config))
-    for node in ['cassandra1', 'cassandra2']:
-        compose('restart', node)
-        eventually(lambda: ready(node))
+        (STATE / 'ldap.yaml').write_text(yaml.safe_dump(config))
+        for node in ['cassandra1', 'cassandra2']:
+            compose('restart', node)
+            eventually(lambda: ready(node))
 
 
 def converge():

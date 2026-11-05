@@ -6,7 +6,7 @@ import pytest
 import yaml
 from cassandra import AuthenticationFailed, Unauthorized
 from cassandra.cluster import NoHostAvailable
-from harness import HERE, STATE, DN, connection, eventually, compose, group_member, change_policy, ready
+from harness import HERE, STATE, DN, connection, eventually, compose, group_member, change_policy, ready, maintenance
 
 
 def user_query(node, query, username='alice', password='test'):
@@ -128,13 +128,14 @@ def test_06b_policy_mismatch_rejects_without_changing_grants():
 def test_06c_replica_outage_fails_closed():
     user_query('cassandra1', "INSERT INTO app.records (id,value) VALUES (7,'before-outage')")
     before = direct_permissions()
-    compose('stop', 'cassandra2')
-    try:
-        with pytest.raises(NoHostAvailable):
-            user_query('cassandra1', "INSERT INTO app.records (id,value) VALUES (7,'no-quorum')")
-    finally:
-        compose('start', 'cassandra2')
-        eventually(lambda: ready('cassandra2'))
+    with maintenance():
+        compose('stop', 'cassandra2')
+        try:
+            with pytest.raises(NoHostAvailable):
+                user_query('cassandra1', "INSERT INTO app.records (id,value) VALUES (7,'no-quorum')")
+        finally:
+            compose('start', 'cassandra2')
+            eventually(lambda: ready('cassandra2'))
     assert direct_permissions() == before
 
 

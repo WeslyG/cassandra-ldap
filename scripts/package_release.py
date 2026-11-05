@@ -1,4 +1,4 @@
-"""Package only clean, tagged sources and jars verified by one full cluster run."""
+"""Package clean tagged sources, checked shaded jars and fast-test evidence."""
 import hashlib
 import io
 import json
@@ -71,40 +71,13 @@ def prepare_release(root, tag, repository=None):
     scenario = root / 'molecule/integration'
     matrix = json.loads((scenario / 'matrix.json').read_text())
     require(set(matrix) == MODULES, 'A release requires all six Cassandra adapters')
-    reports = scenario / '.state/reports'
-    summary = json.loads((reports / 'summary.json').read_text())
-    run_ids = set()
-    files, artifacts, jars, starts = {}, [], [], []
+    files, artifacts, jars = {}, [], []
     for module, config in matrix.items():
         server = config['version']
         require(config['plugin_version'] == version, 'Adapter artifact versions must match the release')
-        result = summary[server]
-        require(result['source_commit'] == commit and result['source_dirty'] is False,
-                f'{server}: e2e evidence is not from this clean commit')
-        require(result['exit_code'] == 0 and result['tests'] == 15
-                and all(result[key] == 0 for key in ('failures', 'errors', 'skipped')),
-                f'{server}: e2e must pass 15/15 with no skips')
-        require(result['idempotence_passed'] is True and result['teardown_passed'] is True,
-                f'{server}: incomplete Molecule lifecycle')
-        require(result['server_versions'] == {'cassandra1': server, 'cassandra2': server},
-                f'{server}: actual node versions differ')
-        require(result.get('systemd_credentials') is True, f'{server}: real systemd credentials must be tested')
-        require(result.get('secret_tests') == {'tests': 8, 'failures': 0, 'errors': 0, 'skipped': 0},
-                f'{server}: secret-source e2e must pass 8/8 with no skips')
-        counters(reports / server / 'secrets.xml', 8)
-        require(result['image'] == f'ldap-integration-systemd:{server}', f'{server}: unexpected server image')
-        require(result['platform'] in ('linux/amd64', 'linux/arm64'), f'{server}: missing runtime platform')
-        require(re.fullmatch(r'[a-f0-9]{32}', result['run_id']), f'{server}: invalid run identifier')
-        run_ids.add(result['run_id'])
-        starts.append(result['started_at'])
-        counters(reports / server / 'results.xml', 15)
-        lifecycle = (reports / server / 'molecule.log').read_text()
-        require(all(marker in lifecycle for marker in ('idempotence: Executed: Successful', 'destroy: Executed: Successful')),
-                f'{server}: lifecycle evidence missing')
         filename = f'cassandra-ldap-{server}-{version}.jar'
         jar = root / f'cassandra-{module}' / 'target' / filename
         data = jar.read_bytes()
-        require(digest(data) == result['jar_sha256'], f'{server}: jar differs from the tested artifact')
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             entries = set(archive.namelist())
             require({'com/instaclustr/cassandra/ldap/auth/LdapAccessSync.class',
@@ -118,25 +91,20 @@ def prepare_release(root, tag, repository=None):
         files[filename] = data
         jars.append(jar)
         artifacts.append({'module': module, 'cassandra_version': server, 'filename': filename,
-                          'sha256': digest(data), 'size_bytes': len(data), 'e2e_tests': 15,
-                          'secret_e2e_tests': 8, 'real_systemd_credentials': True,
-                          'server_image': result['image'], 'platform': result['platform'],
-                          'nodes': result['server_versions'], 'idempotence': True, 'teardown': True})
+                          'sha256': digest(data), 'size_bytes': len(data)})
 
-    require(len(run_ids) == 1, 'Mixed e2e runs cannot be used for a release; run the full matrix')
     unit_report = root / 'cassandra-4.1/target/surefire-reports/TEST-TestSuite.xml'
     unit = counters(unit_report, 18)
-    require(max(jar.stat().st_mtime for jar in jars) <= unit_report.stat().st_mtime <= min(starts),
-            'Unit report must be produced after packaging jars and before the full matrix')
-    manifest = {'schema_version': 1, 'version': version, 'tag': tag, 'commit': commit, 'repository': slug,
-                'verification': {'java_unit_tests': unit, 'e2e_tests': 90, 'secret_e2e_tests': 48,
-                                 'real_systemd_credentials': True, 'e2e_run_id': next(iter(run_ids)),
-                                 'topology': 'two Cassandra nodes and OpenLDAP per adapter'},
+    require(max(jar.stat().st_mtime for jar in jars) <= unit_report.stat().st_mtime,
+            'Unit report must be produced after packaging jars')
+    manifest = {'schema_version': 2, 'version': version, 'tag': tag, 'commit': commit, 'repository': slug,
+                'verification': {'java_unit_tests': unit,
+                                 'cluster_e2e': {'status': 'not_run_by_release_pipeline', 'execution': 'local_only'}},
                 'artifacts': artifacts}
     files['release-manifest.json'] = (json.dumps(manifest, indent=2, sort_keys=True) + '\n').encode()
     base = f'https://github.com/{slug}'
     download = f'{base}/releases/download/{tag}'
-    table = '\n'.join(f'| {item["cassandra_version"]} | [{item["filename"]}]({download}/{item["filename"]}) | 15/15 + 8/8 |' for item in artifacts)
+    table = '\n'.join(f'| {item["cassandra_version"]} | [{item["filename"]}]({download}/{item["filename"]}) |' for item in artifacts)
     bundle_name = f'cassandra-ldap-{version}.zip'
     notes = f'''# Cassandra LDAP Authenticator {tag}
 
@@ -148,13 +116,13 @@ Choose **one jar matching your Cassandra release**, or download the
 [complete bundle]({download}/{bundle_name}) with all adapters, configuration,
 journal schema, license and installation instructions.
 
-| Cassandra | Plugin jar | Access + Secrets e2e |
-|---|---|---:|
+| Cassandra | Plugin jar |
+|---|---|
 {table}
 
 [SHA256SUMS]({download}/SHA256SUMS) verifies every downloadable artifact.
 [release-manifest.json]({download}/release-manifest.json) records the source commit,
-tested jar hashes, server images, node versions and test run identifier.
+built jar hashes and the verification scope.
 
 ## Access Model
 
@@ -182,16 +150,16 @@ Conflicting, missing or empty sources prevent startup; passwords are not trimmed
 
 ## Verified Build
 
-**18 Java unit tests, 90 cluster access checks and 48 secret-source checks passed,
-with no skips.** Both nodes use real systemd encrypted credentials. Each adapter
-ran against two Cassandra nodes and OpenLDAP, including idempotence, concurrent
-logins, existing-session revocation, group/configuration changes, manual-grant
-preservation, directory/replica outages, policy mismatch and lock recovery.
+**18 Java unit tests passed with no skips.** The release pipeline builds all six
+adapters, runs packaging/documentation checks and verifies jar contents, embedded
+versions and checksums. It does not start Cassandra, LDAP or systemd clusters.
 Source: [`{commit[:12]}`]({base}/commit/{commit}).
 
-Secret checks exercise real PID-1 systemd services running as `cassandra`, host-key
-encryption, damaged-ciphertext rejection and credential rotation. TPM-bound
-encryption and production-specific systemd wrappers require separate validation.
+Cluster E2E tests run locally with `make integration-systemd`; their reports are
+not copied into this release or claimed as verification of these CI-built bytes.
+The local suite covers real systemd credentials, access changes and failure
+injection. TPM-bound encryption and production-specific wrappers require separate
+validation. See the [test guide]({base}/blob/{tag}/molecule/integration/README.md).
 
 ## Installation and Safety
 
@@ -205,13 +173,16 @@ Read the [installation guide]({base}/blob/{tag}/README.adoc),
 
 **Operational limits:** revocation is subject to reconciliation/cache delays;
 the global lock has no TTL and requires deliberate recovery after an abandoned
-owner. The bind-DN Cassandra role is created as SUPERUSER. Disabled AD accounts
+owner, including restarts during synchronization. There is no automatic worker
+drain; use the documented maintenance protocol for planned restarts.
+The bind-DN Cassandra role is created as SUPERUSER. Disabled AD accounts
 need operator revocation for existing grants. Nested/primary AD groups are not
 expanded. OpenLDAP e2e is not validation of AD, LDAPS, multi-DC or production load.
 
 The 2.2 test image uses exact Cassandra 2.2.19 server binaries with native Java 8
 and JNA 4.2.2. Compatibility is established for the exact server releases above,
-not every patch release or upstream security support status.
+not every patch release or upstream security support status; release CI does not
+repeat that cluster qualification.
 '''
     install = f'''# Installing Cassandra LDAP {tag}
 
@@ -236,6 +207,8 @@ Verification scope: {base}/blob/{tag}/molecule/integration/README.md
 '''
     secret_guide = (root / 'SECRET_HANDLING.md').read_text().replace(
         '](molecule/integration/README.md)', f']({base}/blob/{tag}/molecule/integration/README.md)')
+    secret_guide = secret_guide.replace('](ACCESS_SYNC.md#planned-maintenance)',
+                                      f']({base}/blob/{tag}/ACCESS_SYNC.md#planned-maintenance)')
     payload = {**files, 'conf/ldap.yaml': (root / 'conf/ldap.yaml').read_bytes(),
                'SECRET_HANDLING.md': secret_guide.encode(),
                'conf/access-sync-schema.cql': (root / 'conf/access-sync-schema.cql').read_bytes(),
@@ -269,7 +242,7 @@ Verification scope: {base}/blob/{tag}/molecule/integration/README.md
 def main():
     tag = os.environ.get('RELEASE_TAG') or git(ROOT, 'describe', '--tags', '--exact-match', 'HEAD')
     target = prepare_release(ROOT, tag, os.environ.get('GITHUB_REPOSITORY'))
-    print(f'Prepared {tag}: six tested jars, bundle, manifest and checksums in dist/{target.name}')
+    print(f'Prepared {tag}: six checked jars, bundle, manifest and checksums in dist/{target.name}')
 
 
 if __name__ == '__main__':

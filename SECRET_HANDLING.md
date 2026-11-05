@@ -133,6 +133,10 @@ credentials does not alter a running service's copy. Password contents and
 source selectors are excluded from the access-policy fingerprint: rotating a
 secret does not require a journal policy migration.
 
+Coordinate planned restarts using the [maintenance protocol](ACCESS_SYNC.md#planned-maintenance).
+The plugin has no automatic worker drain: stopping a process during synchronization
+can leave its non-expiring lock recorded and require deliberate recovery.
+
 Changing a source does not change the password in LDAP. Coordinate the directory
 cutover with node restarts. If the directory cannot accept old and new credentials
 at the same time, nodes still using the old password will reject LDAP operations

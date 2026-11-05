@@ -4,7 +4,7 @@ import os
 import pytest
 import yaml
 
-from harness import STATE, change_policy, compose, connection, eventually, ready
+from harness import STATE, change_policy, compose, connection, eventually, ready, maintenance
 
 SYSTEMD = os.environ.get('LDAP_TEST_SYSTEMD') == 'true'
 SOURCES = ['inline', 'env', 'file'] + (['credential'] if SYSTEMD else [])
@@ -62,17 +62,18 @@ def test_02_missing_env_fails_startup_without_fallback():
     original = (STATE / 'ldap.yaml').read_text()
     config = config_for('env')
     config['ldap_service_password_env'] = 'LDAP_TEST_MISSING'
-    try:
-        (STATE / 'ldap.yaml').write_text(yaml.safe_dump(config))
-        compose('restart', 'cassandra1')
-        eventually(lambda: failed_start('cassandra1'), 90)
-        logs = (compose('exec', '-T', 'cassandra1', 'journalctl', '-u', 'cassandra', '--no-pager').stdout
-                if SYSTEMD else compose('logs', '--no-color', 'cassandra1').stdout)
-        assert 'LDAP service password is missing' in logs
-    finally:
-        (STATE / 'ldap.yaml').write_text(original)
-        compose('start' if not SYSTEMD else 'restart', 'cassandra1')
-        eventually(lambda: ready('cassandra1'))
+    with maintenance():
+        try:
+            (STATE / 'ldap.yaml').write_text(yaml.safe_dump(config))
+            compose('restart', 'cassandra1')
+            eventually(lambda: failed_start('cassandra1'), 90)
+            logs = (compose('exec', '-T', 'cassandra1', 'journalctl', '-u', 'cassandra', '--no-pager').stdout
+                    if SYSTEMD else compose('logs', '--no-color', 'cassandra1').stdout)
+            assert 'LDAP service password is missing' in logs
+        finally:
+            (STATE / 'ldap.yaml').write_text(original)
+            compose('start' if not SYSTEMD else 'restart', 'cassandra1')
+            eventually(lambda: ready('cassandra1'))
     ldap_login()
 
 
@@ -97,7 +98,7 @@ systemctl cat cassandra
 
 if SYSTEMD:
     def test_03_real_systemd_service():
-        change_policy(config_for('credential'))
+        assert yaml.safe_load((STATE / 'ldap.yaml').read_text()).get('ldap_service_password_credential') == 'ldap-bind-password'
         assert_systemd_service()
         ldap_login()
 
@@ -105,16 +106,17 @@ if SYSTEMD:
         node = 'cassandra1'
         path = '/etc/credstore.encrypted/ldap-bind-password.cred'
         compose('exec', '-T', node, 'cp', path, path + '.backup')
-        try:
-            write_fixture(node, path, 'not-an-authenticated-credential\n')
-            compose('exec', '-T', node, 'systemctl', 'restart', 'cassandra', check=False)
-            eventually(lambda: failed_start(node), 30)
-            status = compose('exec', '-T', node, 'systemctl', 'show', 'cassandra', '-p', 'ExecMainStatus').stdout
-            assert '243' in status, status  # systemd EXIT_CREDENTIALS, not a Java auth error.
-        finally:
-            compose('exec', '-T', node, 'mv', path + '.backup', path)
-            compose('exec', '-T', node, 'systemctl', 'restart', 'cassandra')
-            eventually(lambda: ready(node))
+        with maintenance():
+            try:
+                write_fixture(node, path, 'not-an-authenticated-credential\n')
+                compose('exec', '-T', node, 'systemctl', 'restart', 'cassandra', check=False)
+                eventually(lambda: failed_start(node), 30)
+                status = compose('exec', '-T', node, 'systemctl', 'show', 'cassandra', '-p', 'ExecMainStatus').stdout
+                assert '243' in status, status  # systemd EXIT_CREDENTIALS, not a Java auth error.
+            finally:
+                compose('exec', '-T', node, 'mv', path + '.backup', path)
+                compose('exec', '-T', node, 'systemctl', 'restart', 'cassandra')
+                eventually(lambda: ready(node))
         ldap_login()
 
     def test_05_credential_rotation_on_restart():
@@ -127,13 +129,15 @@ if SYSTEMD:
             compose('exec', '-T', node, 'mv', path + '.new', path)
             # Active service still has its original immutable credential.
             ldap_login()
-            compose('exec', '-T', node, 'systemctl', 'restart', 'cassandra')
-            eventually(lambda: ready(node))
+            with maintenance():
+                compose('exec', '-T', node, 'systemctl', 'restart', 'cassandra')
+                eventually(lambda: ready(node))
             from test_access import denied_login
             denied_login(node, 'alice', 'test')
         finally:
-            compose('exec', '-T', node, 'mv', path + '.backup', path)
-            compose('exec', '-T', node, 'systemctl', 'restart', 'cassandra')
-            eventually(lambda: ready(node))
+            with maintenance():
+                compose('exec', '-T', node, 'mv', path + '.backup', path)
+                compose('exec', '-T', node, 'systemctl', 'restart', 'cassandra')
+                eventually(lambda: ready(node))
         assert_systemd_service()
         ldap_login()

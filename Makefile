@@ -7,15 +7,17 @@ JAVA_BUILD_IMAGE ?= maven:3.9.9-eclipse-temurin-17
 
 .PHONY: integration-4.1 integration-4.1-destroy
 
-.PHONY: build-all test-unit test-release check-docs integration-all integration-systemd release-package
+.PHONY: build-all verify-fast test-unit test-release check-docs integration-all integration-systemd release-package
 
 build-all:
 	docker run --rm -v "$(CURDIR):/work" -w /work $(JAVA_BUILD_IMAGE) mvn -B -s .mvn/matrix-settings.xml -Dmaven.repo.local=/work/.m2/repository -DskipTests -Dmaven.javadoc.skip=true package
 
-integration-all: build-all
+verify-fast: build-all
 	$(MAKE) test-unit
 	$(MAKE) test-release
 	$(MAKE) check-docs
+
+integration-all: verify-fast
 	LDAP_TEST_SYSTEMD=true bash molecule/integration/run.sh matrix
 
 integration-systemd: integration-all

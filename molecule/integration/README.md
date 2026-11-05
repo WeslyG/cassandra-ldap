@@ -37,6 +37,9 @@ Build all jars, run unit tests, and run the complete cluster matrix:
 make integration-all
 ```
 
+This is a local command. GitHub Actions and CircleCI run `make verify-fast` only:
+builds, Java unit tests, packaging tests and documentation checks, without clusters.
+
 Individual stages:
 
 ```sh
@@ -83,6 +86,13 @@ data volumes, not unrelated Docker resources.
 6. Run converge again and require no changes (Molecule idempotence).
 7. Execute the behavioral tests against the live cluster.
 8. Preserve node/LDAP logs and destroy the scenario containers and volumes.
+
+Planned restarts and replica outage injection reserve an idle coordinator with
+a dedicated controller UUID before stopping a node. Background workers cannot
+enter the grant/revoke critical section while this maintenance owner is present.
+The controller releases only its own UUID after nodes recover. It does not steal
+an existing writer's lock or add a TTL. This is test/operator coordination, not
+a graceful-shutdown mechanism in the Java plugin.
 
 The matrix hashes the jar before running and checks it again afterward.
 It records actual release versions from both servers, not just image tags.
@@ -157,7 +167,7 @@ LDAP_TEST_SYSTEMD=true bash molecule/integration/run.sh matrix 4.1
 For the ordinary upstream Docker entrypoint (without systemd), use
 `bash molecule/integration/run.sh matrix`. That mode runs 4 secret-source cases
 (inline, ENV, file, missing ENV) in addition to the same 15 access cases. It is
-useful for debugging but is not sufficient for the release credential gate.
+useful for debugging but does not validate real systemd credentials.
 
 Pytest collects 15 cases. The invalid-login test has four parameter combinations;
 all other rows are single tests.
@@ -182,7 +192,7 @@ bound because Cassandra caches authorization. The test requires a real
 Unauthorized response, not merely a changed system_auth row. Other eventually
 checks also have explicit bounds. An already executing query is not cancelled.
 
-A passing release version requires the full Molecule lifecycle, idempotence,
+A passing local matrix version requires the full Molecule lifecycle, idempotence,
 15 access cases and 8 systemd secret-source cases, with no skipped tests. Six
 passing versions give 90 access and 48 secret-source checks.
 The isolated topology verifies normal paths and injected failures, not a proof
@@ -230,10 +240,11 @@ Matrix reports are ignored by Git and live in `.state/reports/`:
 A selective rerun preserves results for other versions, so aggregate entries
 need not come from the same invocation. Compare jar hashes to the current
 artifacts before reusing evidence. A build alone is not an e2e pass.
-A release additionally requires a common run ID from one full invocation, the
-same clean source commit, both actual node versions, idempotence and teardown.
-The matrix records this provenance; selective development runs do not satisfy
-the release gate. See [Releasing](../../RELEASING.md).
+The matrix records run IDs, source commits, node versions and jar hashes for
+local investigation. Release packaging does not read these reports, and its
+manifest explicitly marks cluster E2E as local-only. Do not combine local reports
+with CI-built jar hashes or claim they verify different binary files.
+See [Releasing](../../RELEASING.md).
 A failed bootstrap may have no results.xml; the exit code and logs remain
 essential. Failed tests can affect later cases because this suite intentionally
 exercises one user's lifecycle in order; diagnose the first failure first.

@@ -7,14 +7,11 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Build all plugins, check docs and test real clusters
-          command: make integration-all
-          no_output_timeout: 40m
+          name: Build all plugins and run fast checks
+          command: make verify-fast
+          no_output_timeout: 20m
       - store_test_results:
-          path: molecule/integration/.state/reports
-      - store_artifacts:
-          path: molecule/integration/.state/reports
-          destination: cluster-reports
+          path: cassandra-4.1/target/surefire-reports
       - store_artifacts:
           path: cassandra-4.1/target/surefire-reports
           destination: unit-reports
@@ -39,7 +36,7 @@ jobs:
             - m2-
 
       - run: sudo apt-get update && sudo apt install openjdk-11-jdk
-      - run: mvn clean install -DoutputDirectory=/tmp/artifacts -Dversion.cassandra4=4.0.16
+      - run: mvn clean install -DskipTests -DoutputDirectory=/tmp/artifacts -Dversion.cassandra4=4.0.16
 
       - save_cache:
           paths:
@@ -73,7 +70,7 @@ jobs:
             - m2-
 
       - run: sudo apt-get update && sudo apt install openjdk-11-jdk
-      - run: mvn clean install -DoutputDirectory=/tmp/artifacts -Dversion.cassandra41=4.1.10
+      - run: mvn clean install -DskipTests -DoutputDirectory=/tmp/artifacts -Dversion.cassandra41=4.1.10
 
       - save_cache:
           paths:
@@ -107,7 +104,7 @@ jobs:
             - m2-
 
       - run: sudo apt-get update && sudo apt install openjdk-11-jdk
-      - run: mvn clean install -DoutputDirectory=/tmp/artifacts -Dversion.cassandra50=5.0.6
+      - run: mvn clean install -DskipTests -DoutputDirectory=/tmp/artifacts -Dversion.cassandra50=5.0.6
 
       - save_cache:
           paths:
