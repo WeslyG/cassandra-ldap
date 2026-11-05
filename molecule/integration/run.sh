@@ -20,5 +20,5 @@ exec docker run --rm --name cassandra-ldap-integration-runner \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$root:$root" -w "$root" \
   -e ANSIBLE_LOCAL_TEMP=/tmp/ansible-local \
-  -e CASSANDRA_IMAGE -e CASSANDRA_PLATFORM -e LDAP_PLUGIN_JAR -e LDAP_AUTHENTICATOR -e CASSANDRA_VERSION \
+  -e CASSANDRA_IMAGE -e CASSANDRA_PLATFORM -e LDAP_PLUGIN_JAR -e LDAP_AUTHENTICATOR -e CASSANDRA_VERSION -e LDAP_TEST_SYSTEMD -e LDAP_STOP_SIGNAL \
   --entrypoint "$entrypoint" cassandra-ldap-integration-runner "$@"

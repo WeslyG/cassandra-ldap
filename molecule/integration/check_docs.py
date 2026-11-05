@@ -1,5 +1,6 @@
 """Validate repository documentation without Docker socket or live services."""
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -52,7 +53,7 @@ def main():
         row = f'|cassandra-{module} |{version} |{config["plugin_version"]} |{config["authenticator"]}'
         require(row in readme, module + ': README version table drift')
 
-    docs = [ROOT / name for name in ('README.adoc', 'ACCESS_SYNC.md', 'RELEASING.md', 'agent.md', 'AGENTS.md')]
+    docs = [ROOT / name for name in ('README.adoc', 'ACCESS_SYNC.md', 'SECRET_HANDLING.md', 'RELEASING.md', 'agent.md', 'AGENTS.md')]
     docs.append(SCENARIO / 'README.md')
     for doc in docs:
         text = doc.read_text()
@@ -67,14 +68,23 @@ def main():
 
     unit_dir = ROOT / 'cassandra-4.1/src/test/java/com/instaclustr/cassandra/ldap/auth'
     unit_count = sum(len(re.findall(r'@Test\b', (unit_dir / (name + '.java')).read_text()))
-                     for name in ('AccessPolicyTest', 'LDAPSecurityTest', 'DistributedQueryTest'))
-    require(unit_count == 10, 'Update the documented unit-test counts')
+                     for name in ('AccessPolicyTest', 'LDAPSecurityTest', 'DistributedQueryTest', 'LdapSecretResolverTest'))
+    require(unit_count == 18, 'Update the documented unit-test counts')
     collected = subprocess.run([sys.executable, '-m', 'pytest', '--collect-only', '-q',
                                 '-p', 'no:cacheprovider', str(SCENARIO / 'test_access.py')],
                                cwd=ROOT, text=True, capture_output=True, check=True)
     require(re.search(r'\b15 tests collected\b', collected.stdout) is not None,
             'Update documented e2e counts and matrix acceptance guard')
-    print('Documentation valid: YAML examples, Java defaults, six Maven adapters, local links, 10 unit and 15 e2e cases.')
+    for systemd, count in [('false', 4), ('true', 8)]:
+        collected = subprocess.run([sys.executable, '-m', 'pytest', '--collect-only', '-q',
+                                    '-p', 'no:cacheprovider', str(SCENARIO / 'test_secrets.py')],
+                                   cwd=ROOT, env=dict(os.environ, LDAP_TEST_SYSTEMD=systemd),
+                                   text=True, capture_output=True, check=True)
+        require(re.search(rf'\b{count} tests collected\b', collected.stdout) is not None,
+                'Update documented secret-source e2e counts and matrix acceptance guard')
+    for key in ('PASSWORD_KEY', 'PASSWORD_ENV_KEY', 'PASSWORD_FILE_KEY', 'PASSWORD_CREDENTIAL_KEY'):
+        require(f'|{constants[key]} |Exclusive source |' in readme, 'Undocumented password source')
+    print('Documentation valid: YAML/defaults, six adapters, links, 18 unit, 15 access and 4/8 secret e2e cases.')
 
 
 if __name__ == '__main__':

@@ -6,7 +6,8 @@ The scenario name is `integration`; `matrix.json` selects the version adapters.
 Run commands from the repository root on a host with Docker Compose v2, Bash,
 Make, registry access and sufficient Docker resources. Allow at least 4 GB of
 Docker memory for the test cluster; 6-8 GB is preferable when other services run.
-A full matrix takes roughly 25-35 minutes, depending on pulls and machine speed.
+A full systemd/secret-source matrix can take an hour or longer, depending on
+image pulls, machine speed and rolling restarts.
 
 Ansible, Molecule, pytest and the Cassandra Python driver run inside the image
 built from `weslyg/ansible-infra:ansible12-2026.11.04`. Maven/Java builds use
@@ -43,13 +44,13 @@ make build-all
 make test-unit
 make test-release
 make check-docs
-bash molecule/integration/run.sh matrix
+LDAP_TEST_SYSTEMD=true bash molecule/integration/run.sh matrix
 ```
 
 Retest selected adapters without rebuilding jars:
 
 ```sh
-bash molecule/integration/run.sh matrix 3.0 5.0
+LDAP_TEST_SYSTEMD=true bash molecule/integration/run.sh matrix 3.0 5.0
 ```
 
 Run just the default 4.1 scenario using a prebuilt 4.1 jar:
@@ -89,7 +90,7 @@ Do not rebuild a jar while its cluster test is running.
 
 ## Unit Tests
 
-`make test-unit` runs 10 TestNG tests using the 4.1 module as a classpath for
+`make test-unit` runs 18 TestNG tests using the 4.1 module as a classpath for
 the shared code:
 
 | Class | Count | Coverage |
@@ -97,6 +98,7 @@ the shared code:
 | AccessPolicyTest | 4 | Group union/deduplication, removal of one group, empty desired access, exact keyspace journal encoding |
 | LDAPSecurityTest | 3 | LDAP filter escaping; empty and missing password rejection before opening LDAP |
 | DistributedQueryTest | 3 | CQL quote/question-mark handling, set element escaping, missing bind parameters |
+| LdapSecretResolverTest | 8 | Exclusive sources, whitespace, ENV, UTF-8/file bounds, credential traversal/symlinks, safe YAML errors |
 
 These tests do not start LDAP or Cassandra. They do not prove a running cluster
 works or exhaustively test YAML parsing. Surefire XML reports are under
@@ -109,10 +111,53 @@ The Docker/Molecule scenario is the real-cluster acceptance path.
 
 `make check-docs` runs in the same runner without mounting the Docker socket.
 It checks README YAML against the example file, Java defaults, Maven/matrix
-versions, local documentation links, 10 unit annotations and collection of all
-15 pytest cases without opening database or LDAP connections.
+versions, local documentation links, 18 unit annotations and collection of all
+15 access cases and 4/8 secret-source cases (plain/systemd mode), without opening
+database or LDAP connections.
 
 ## Behavioral Tests
+
+`make integration-all` (also `make integration-systemd`) builds all six jars,
+runs unit/packaging/documentation checks and executes the full matrix under
+**real systemd**. Each version uses a fresh pair of privileged, private-cgroup
+containers with systemd 252 as PID 1 and `User=cassandra`. The derived image keeps
+the exact server distribution and Java runtime from the version's original image;
+the Linux userspace is Debian 12. OpenLDAP is a separate disposable container.
+Privileges apply only to these test nodes. Docker socket access is equally
+privileged: do not run this scenario on an untrusted/shared Docker host.
+
+The boot script performs `mount --make-rshared /` in its container mount namespace,
+encrypts the synthetic bind secret with real `systemd-creds --with-key=host`, and
+starts systemd. The actual Cassandra unit uses `LoadCredentialEncrypted=` and
+`PrivateMounts=yes`. No test injects a fake CREDENTIALS_DIRECTORY. Do not change
+host mount propagation or bind the host's credential store/cgroup tree into nodes.
+
+Before the 15 access tests, `test_secrets.py` runs 8 cases per version:
+
+| Case | Count | Verification |
+|---|---:|---|
+| Source selection | 4 | Inline, ENV via systemd EnvironmentFile, UTF-8 file with CRLF, real encrypted credential; LDAP login on both nodes |
+| Missing ENV | 1 | Cassandra startup fails without fallback; recovery restores LDAP login |
+| Service identity | 1 | PID 1 is systemd, unit/Java user is cassandra, actual JVM receives credential directory but not password ENV, host key exists |
+| Damaged ciphertext | 1 | systemd rejects service activation with EXIT_CREDENTIALS before Java starts; restore and authenticate |
+| Rotation | 1 | Old credential remains usable before restart, new wrong password rejects LDAP after restart, restored encrypted credential recovers login |
+
+All nodes then run the access lifecycle with the credential source. Reports
+include `secrets.xml`, `systemd.log` and `systemd_credentials` in summary JSON;
+zero failures/errors/skips are required. The full matrix has 90 access and 48
+secret-source checks. This verifies host-key encryption, not TPM binding, all
+Linux distributions or a production package's privilege-dropping wrappers.
+
+For a targeted systemd run without rebuilding artifacts:
+
+```sh
+LDAP_TEST_SYSTEMD=true bash molecule/integration/run.sh matrix 4.1
+```
+
+For the ordinary upstream Docker entrypoint (without systemd), use
+`bash molecule/integration/run.sh matrix`. That mode runs 4 secret-source cases
+(inline, ENV, file, missing ENV) in addition to the same 15 access cases. It is
+useful for debugging but is not sufficient for the release credential gate.
 
 Pytest collects 15 cases. The invalid-login test has four parameter combinations;
 all other rows are single tests.
@@ -137,12 +182,16 @@ bound because Cassandra caches authorization. The test requires a real
 Unauthorized response, not merely a changed system_auth row. Other eventually
 checks also have explicit bounds. An already executing query is not cancelled.
 
-A passing version requires the full Molecule lifecycle, idempotence, exactly 15
-cases and no skipped tests. Six passing versions give 90 behavioral checks.
+A passing release version requires the full Molecule lifecycle, idempotence,
+15 access cases and 8 systemd secret-source cases, with no skipped tests. Six
+passing versions give 90 access and 48 secret-source checks.
 The isolated topology verifies normal paths and injected failures, not a proof
 against every possible process/network failure ordering.
 
 ## Runtime Matrix
+
+These are the source distributions. The systemd matrix copies each exact server
+and its Java runtime into the Debian 12/systemd test image described above.
 
 | Adapter | Server release | Test runtime |
 |---|---|---|
@@ -172,6 +221,8 @@ Matrix reports are ignored by Git and live in `.state/reports/`:
 | summary.json | Latest recorded result for each version, including exit code, image, jar SHA-256, node releases and counts |
 | VERSION/summary.json | One version's result |
 | VERSION/results.xml | Pytest JUnit XML |
+| VERSION/secrets.xml | Secret-source and systemd credential JUnit XML |
+| VERSION/systemd.log | Cassandra systemd service journals |
 | VERSION/molecule.log | Lifecycle, idempotence and test output |
 | VERSION/containers.log | Both Cassandra nodes and LDAP logs |
 | VERSION/previous-results.xml | Previous raw test result, when available |
@@ -188,7 +239,9 @@ essential. Failed tests can affect later cases because this suite intentionally
 exercises one user's lifecycle in order; diagnose the first failure first.
 
 Standalone runs write `.state/current-results.xml` and
-`.state/current-containers.log` unless CASSANDRA_VERSION selects another prefix.
+`.state/current-secrets.xml`, plus `.state/current-containers.log`, unless
+CASSANDRA_VERSION selects another prefix. Systemd mode also writes
+`.state/current-systemd.log`.
 Expected failure-injection logs include LDAP errors, lock timeouts, policy
 mismatches and QUORUM unavailability. Distinguish them from unexpected linkage
 errors or failing JUnit cases. Raw logs can contain workspace paths and node

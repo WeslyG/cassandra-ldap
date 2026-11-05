@@ -1,0 +1,23 @@
+[Unit]
+Description=Disposable Cassandra LDAP acceptance service
+After=local-fs.target
+
+[Service]
+Type=simple
+User=cassandra
+Group=cassandra
+Environment=JAVA_HOME=/opt/java/openjdk
+Environment=CASSANDRA_HOME=/opt/cassandra
+Environment=CASSANDRA_CONF=/etc/cassandra
+Environment=PATH=/opt/cassandra/bin:/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=/etc/cassandra/ldap-test.env
+PassEnvironment=CASSANDRA_CLUSTER_NAME CASSANDRA_SEEDS CASSANDRA_ENDPOINT_SNITCH CASSANDRA_DC MAX_HEAP_SIZE HEAP_NEWSIZE LDAP_AUTHENTICATOR
+LoadCredentialEncrypted=ldap-bind-password:/etc/credstore.encrypted/ldap-bind-password.cred
+PrivateMounts=yes
+ExecStart=/bin/bash /suite/start-cassandra.sh
+TimeoutStopSec=25
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

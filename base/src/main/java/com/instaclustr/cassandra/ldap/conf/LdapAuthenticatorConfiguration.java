@@ -51,6 +51,9 @@ public final class LdapAuthenticatorConfiguration
     public static final String CONTEXT_FACTORY_PROP = "ldap_context_factory";
     public static final String LDAP_DN = "ldap_service_dn";
     public static final String PASSWORD_KEY = "ldap_service_password";
+    public static final String PASSWORD_ENV_KEY = "ldap_service_password_env";
+    public static final String PASSWORD_FILE_KEY = "ldap_service_password_file";
+    public static final String PASSWORD_CREDENTIAL_KEY = "ldap_service_password_credential";
     public static final String FILTER_TEMPLATE = "ldap_filter_template";
     public static final String GROUP_ROLE_MAPPINGS = "group_role_mappings";
     public static final String GROUP_ROLE_MAPPING_LDAP_GROUP_DN = "ldap_group_dn";
@@ -77,7 +80,7 @@ public final class LdapAuthenticatorConfiguration
 
         final String ldapUri = requireString(root, LDAP_URI_PROP, configurationFile);
         final String ldapServiceDn = requireString(root, LDAP_DN, configurationFile);
-        final String ldapServicePassword = requireString(root, PASSWORD_KEY, configurationFile);
+        final String ldapServicePassword = LdapSecretResolver.resolve(root, System.getenv());
         final String ldapFilterTemplate = optionalString(root, FILTER_TEMPLATE, "(cn=%s)");
         final String ldapContextFactory = optionalString(root, CONTEXT_FACTORY_PROP, DEFAULT_CONTEXT_FACTORY);
         final boolean authCacheEnabled = optionalBoolean(root, CASSANDRA_AUTH_CACHE_ENABLED_PROP, true);
@@ -198,10 +201,8 @@ public final class LdapAuthenticatorConfiguration
             throw new ConfigurationException(format("Could not open LDAP configuration file %s", configurationFile), ex);
         } catch (final RuntimeException ex)
         {
-            throw new ConfigurationException(format("Could not parse LDAP configuration file %s: %s",
-                                                    configurationFile.getAbsolutePath(),
-                                                    ex.getMessage()),
-                                             ex);
+            // YAML exceptions include source snippets, which may contain a password.
+            throw new ConfigurationException("Could not parse LDAP configuration YAML (details suppressed to protect secrets).");
         }
     }
 

@@ -88,7 +88,11 @@ def prepare_release(root, tag, repository=None):
                 f'{server}: incomplete Molecule lifecycle')
         require(result['server_versions'] == {'cassandra1': server, 'cassandra2': server},
                 f'{server}: actual node versions differ')
-        require(result['image'] == config.get('image', f'cassandra:{server}'), f'{server}: unexpected server image')
+        require(result.get('systemd_credentials') is True, f'{server}: real systemd credentials must be tested')
+        require(result.get('secret_tests') == {'tests': 8, 'failures': 0, 'errors': 0, 'skipped': 0},
+                f'{server}: secret-source e2e must pass 8/8 with no skips')
+        counters(reports / server / 'secrets.xml', 8)
+        require(result['image'] == f'ldap-integration-systemd:{server}', f'{server}: unexpected server image')
         require(result['platform'] in ('linux/amd64', 'linux/arm64'), f'{server}: missing runtime platform')
         require(re.fullmatch(r'[a-f0-9]{32}', result['run_id']), f'{server}: invalid run identifier')
         run_ids.add(result['run_id'])
@@ -104,6 +108,7 @@ def prepare_release(root, tag, repository=None):
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             entries = set(archive.namelist())
             require({'com/instaclustr/cassandra/ldap/auth/LdapAccessSync.class',
+                     'com/instaclustr/cassandra/ldap/conf/LdapSecretResolver.class',
                      'org/apache/cassandra/auth/LDAPCassandraRoleManager.class'} <= entries,
                     f'{server}: artifact is not the shaded plugin')
             require(not any(name.startswith(('org/yaml/snakeyaml/', 'com/google/common/', 'org/apache/cassandra/cql3/')) for name in entries),
@@ -114,22 +119,24 @@ def prepare_release(root, tag, repository=None):
         jars.append(jar)
         artifacts.append({'module': module, 'cassandra_version': server, 'filename': filename,
                           'sha256': digest(data), 'size_bytes': len(data), 'e2e_tests': 15,
+                          'secret_e2e_tests': 8, 'real_systemd_credentials': True,
                           'server_image': result['image'], 'platform': result['platform'],
                           'nodes': result['server_versions'], 'idempotence': True, 'teardown': True})
 
     require(len(run_ids) == 1, 'Mixed e2e runs cannot be used for a release; run the full matrix')
     unit_report = root / 'cassandra-4.1/target/surefire-reports/TEST-TestSuite.xml'
-    unit = counters(unit_report, 10)
+    unit = counters(unit_report, 18)
     require(max(jar.stat().st_mtime for jar in jars) <= unit_report.stat().st_mtime <= min(starts),
             'Unit report must be produced after packaging jars and before the full matrix')
     manifest = {'schema_version': 1, 'version': version, 'tag': tag, 'commit': commit, 'repository': slug,
-                'verification': {'java_unit_tests': unit, 'e2e_tests': 90, 'e2e_run_id': next(iter(run_ids)),
+                'verification': {'java_unit_tests': unit, 'e2e_tests': 90, 'secret_e2e_tests': 48,
+                                 'real_systemd_credentials': True, 'e2e_run_id': next(iter(run_ids)),
                                  'topology': 'two Cassandra nodes and OpenLDAP per adapter'},
                 'artifacts': artifacts}
     files['release-manifest.json'] = (json.dumps(manifest, indent=2, sort_keys=True) + '\n').encode()
     base = f'https://github.com/{slug}'
     download = f'{base}/releases/download/{tag}'
-    table = '\n'.join(f'| {item["cassandra_version"]} | [{item["filename"]}]({download}/{item["filename"]}) | 15/15 |' for item in artifacts)
+    table = '\n'.join(f'| {item["cassandra_version"]} | [{item["filename"]}]({download}/{item["filename"]}) | 15/15 + 8/8 |' for item in artifacts)
     bundle_name = f'cassandra-ldap-{version}.zip'
     notes = f'''# Cassandra LDAP Authenticator {tag}
 
@@ -141,7 +148,7 @@ Choose **one jar matching your Cassandra release**, or download the
 [complete bundle]({download}/{bundle_name}) with all adapters, configuration,
 journal schema, license and installation instructions.
 
-| Cassandra | Plugin jar | Cluster e2e |
+| Cassandra | Plugin jar | Access + Secrets e2e |
 |---|---|---:|
 {table}
 
@@ -158,18 +165,38 @@ tested jar hashes, server images, node versions and test run identifier.
 - Fresh LDAP credential verification, escaped LDAP/CQL values and fail-closed synchronization.
 - Native administrator access for recovery when LDAP is unavailable.
 
+## Bind Secrets
+
+Choose exactly one password source in `ldap.yaml`:
+
+| Source | Configuration key |
+|---|---|
+| Encrypted systemd credential (recommended) | `ldap_service_password_credential` |
+| Process environment | `ldap_service_password_env` |
+| Mounted UTF-8 secret file | `ldap_service_password_file` |
+| Inline YAML literal | `ldap_service_password` |
+
+See [secret deployment]({base}/blob/{tag}/SECRET_HANDLING.md) for
+`LoadCredentialEncrypted=`, EnvironmentFile, Ansible operation and rolling rotation.
+Conflicting, missing or empty sources prevent startup; passwords are not trimmed.
+
 ## Verified Build
 
-**10 Java unit tests and 90 cluster e2e checks passed, with no skips.** Each adapter
+**18 Java unit tests, 90 cluster access checks and 48 secret-source checks passed,
+with no skips.** Both nodes use real systemd encrypted credentials. Each adapter
 ran against two Cassandra nodes and OpenLDAP, including idempotence, concurrent
 logins, existing-session revocation, group/configuration changes, manual-grant
 preservation, directory/replica outages, policy mismatch and lock recovery.
 Source: [`{commit[:12]}`]({base}/commit/{commit}).
 
+Secret checks exercise real PID-1 systemd services running as `cassandra`, host-key
+encryption, damaged-ciphertext rejection and credential rotation. TPM-bound
+encryption and production-specific systemd wrappers require separate validation.
+
 ## Installation and Safety
 
 Provision `ldap_auth` using the supplied schema, create mapped roles/keyspaces,
-install only the matching shaded jar, render `ldap.yaml` with your own secret,
+install only the matching shaded jar, configure a bind-secret source in `ldap.yaml`,
 and roll nodes with native administrator access available.
 
 Read the [installation guide]({base}/blob/{tag}/README.adoc),
@@ -193,7 +220,8 @@ not every patch release or upstream security support status.
 3. Provision system_auth and ldap_auth with suitable NetworkTopologyStrategy
    replication, repair after replication changes, and apply conf/access-sync-schema.cql.
 4. Create mapped roles and keyspaces. LDAP users must not be able to write ldap_auth.
-5. Render conf/ldap.yaml with deployment secrets, restrict file permissions, and
+5. Configure exactly one bind-secret source in conf/ldap.yaml. Prefer systemd
+   LoadCredentialEncrypted; see SECRET_HANDLING.md. Restrict file permissions and
    set -Dcassandra.ldap.config.file=/etc/cassandra/ldap.yaml in node JVM options.
 6. Configure the correct authenticator, LDAPCassandraRoleManager and CassandraAuthorizer.
    Configure QUORUM auth writes on 4.1/5.0. Roll and verify nodes one at a time.
@@ -206,7 +234,10 @@ Full installation: {base}/blob/{tag}/README.adoc
 Operations and recovery: {base}/blob/{tag}/ACCESS_SYNC.md
 Verification scope: {base}/blob/{tag}/molecule/integration/README.md
 '''
+    secret_guide = (root / 'SECRET_HANDLING.md').read_text().replace(
+        '](molecule/integration/README.md)', f']({base}/blob/{tag}/molecule/integration/README.md)')
     payload = {**files, 'conf/ldap.yaml': (root / 'conf/ldap.yaml').read_bytes(),
+               'SECRET_HANDLING.md': secret_guide.encode(),
                'conf/access-sync-schema.cql': (root / 'conf/access-sync-schema.cql').read_bytes(),
                'LICENSE': (root / 'LICENSE').read_bytes(), 'INSTALL.md': install.encode()}
     payload['SHA256SUMS'] = checksums(payload)

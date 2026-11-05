@@ -2,7 +2,11 @@ name: cassandra-ldap-integration
 x-cassandra: &cassandra
   image: ${CASSANDRA_IMAGE:-cassandra:4.1.10}
   platform: ${CASSANDRA_PLATFORM:-}
-  entrypoint: ["/bin/bash", "/suite/start-cassandra.sh"]
+  entrypoint: ["/bin/bash", "/suite/container-start.sh"]
+  privileged: ${LDAP_TEST_SYSTEMD:-false}
+  cgroup: private
+  tmpfs: [/run, /run/lock]
+  stop_signal: ${LDAP_STOP_SIGNAL:-SIGTERM}
   environment:
     CASSANDRA_CLUSTER_NAME: cassandra-ldap-integration
     CASSANDRA_SEEDS: cassandra1
@@ -11,9 +15,11 @@ x-cassandra: &cassandra
     MAX_HEAP_SIZE: 768M
     HEAP_NEWSIZE: 128M
     LDAP_AUTHENTICATOR: ${LDAP_AUTHENTICATOR:-LDAPAuthenticator}
+    LDAP_TEST_SYSTEMD: ${LDAP_TEST_SYSTEMD:-false}
+    LDAP_TEST_BIND_PASSWORD: admin
   volumes:
     - .:/suite:ro
-    - ${LDAP_PLUGIN_JAR:-../../cassandra-4.1/target/cassandra-ldap-4.1.10-1.2.0.jar}:/opt/cassandra/lib/ldap-plugin.jar:ro
+    - ${LDAP_PLUGIN_JAR:-../../cassandra-4.1/target/cassandra-ldap-4.1.10-1.3.0.jar}:/opt/cassandra/lib/ldap-plugin.jar:ro
   ports: ["127.0.0.1::9042"]
   stop_grace_period: 30s
 services:
@@ -30,14 +36,14 @@ services:
     hostname: cassandra1
     volumes:
       - .:/suite:ro
-      - ${LDAP_PLUGIN_JAR:-../../cassandra-4.1/target/cassandra-ldap-4.1.10-1.2.0.jar}:/opt/cassandra/lib/ldap-plugin.jar:ro
+      - ${LDAP_PLUGIN_JAR:-../../cassandra-4.1/target/cassandra-ldap-4.1.10-1.3.0.jar}:/opt/cassandra/lib/ldap-plugin.jar:ro
       - data1:/var/lib/cassandra
   cassandra2:
     <<: *cassandra
     hostname: cassandra2
     volumes:
       - .:/suite:ro
-      - ${LDAP_PLUGIN_JAR:-../../cassandra-4.1/target/cassandra-ldap-4.1.10-1.2.0.jar}:/opt/cassandra/lib/ldap-plugin.jar:ro
+      - ${LDAP_PLUGIN_JAR:-../../cassandra-4.1/target/cassandra-ldap-4.1.10-1.3.0.jar}:/opt/cassandra/lib/ldap-plugin.jar:ro
       - data2:/var/lib/cassandra
 volumes:
   data1:

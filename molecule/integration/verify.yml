@@ -3,6 +3,10 @@
   connection: local
   gather_facts: false
   tasks:
+    - name: Verify secret sources and real systemd credentials before access mutations
+      ansible.builtin.command:
+        argv: ["{{ ansible_playbook_python }}", -m, pytest, -v, -s, "{{ playbook_dir }}/test_secrets.py", "--junitxml={{ playbook_dir }}/.state/{{ lookup('env', 'CASSANDRA_VERSION') | default('current', true) }}-secrets.xml"]
+      changed_when: false
     - name: Run behavioral tests
       ansible.builtin.command:
         argv: ["{{ ansible_playbook_python }}", -m, pytest, -v, -s, "{{ playbook_dir }}/test_access.py", "--junitxml={{ playbook_dir }}/.state/{{ lookup('env', 'CASSANDRA_VERSION') | default('current', true) }}-results.xml"]

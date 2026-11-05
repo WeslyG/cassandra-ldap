@@ -23,6 +23,7 @@ class ReleasePackagingTest(unittest.TestCase):
         self.write('.gitignore', '**/target/\nmolecule/integration/.state/\ndist/\n')
         self.write('pom.xml', '<project xmlns="http://maven.apache.org/POM/4.0.0"><version>1.2.0</version></project>')
         self.write('conf/ldap.yaml', 'ldap_service_password: REPLACE_WITH_SECRET\n')
+        self.write('SECRET_HANDLING.md', '# Secret sources\n[Tests](molecule/integration/README.md)\n')
         self.write('conf/access-sync-schema.cql', '-- Synthetic schema fixture\n')
         self.write('LICENSE', 'Synthetic license fixture\n')
         self.matrix = {module: {'version': server, 'plugin_version': '1.2.0'} for module, server in
@@ -44,6 +45,7 @@ class ReleasePackagingTest(unittest.TestCase):
             path.parent.mkdir(parents=True)
             with zipfile.ZipFile(path, 'w') as jar:
                 jar.writestr('com/instaclustr/cassandra/ldap/auth/LdapAccessSync.class', b'fixture')
+                jar.writestr('com/instaclustr/cassandra/ldap/conf/LdapSecretResolver.class', b'fixture')
                 jar.writestr('org/apache/cassandra/auth/LDAPCassandraRoleManager.class', b'fixture')
                 jar.writestr(f'META-INF/maven/com.instaclustr/cassandra-ldap-{server}/pom.properties', 'version=1.2.0\n')
             os.utime(path, (now, now))
@@ -52,12 +54,15 @@ class ReleasePackagingTest(unittest.TestCase):
                                     'failures': 0, 'errors': 0, 'skipped': 0,
                                     'idempotence_passed': True, 'teardown_passed': True,
                                     'server_versions': {'cassandra1': server, 'cassandra2': server},
-                                    'image': f'cassandra:{server}', 'platform': 'linux/arm64',
+                                    'image': f'ldap-integration-systemd:{server}', 'platform': 'linux/arm64',
+                                    'systemd_credentials': True,
+                                    'secret_tests': {'tests': 8, 'failures': 0, 'errors': 0, 'skipped': 0},
                                     'jar_sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'started_at': now + 2}
             self.write(f'molecule/integration/.state/reports/{server}/results.xml', self.xml(15))
+            self.write(f'molecule/integration/.state/reports/{server}/secrets.xml', self.xml(8))
             self.write(f'molecule/integration/.state/reports/{server}/molecule.log',
                        'idempotence: Executed: Successful\ndestroy: Executed: Successful\n')
-        self.unit = self.write('cassandra-4.1/target/surefire-reports/TEST-TestSuite.xml', self.xml(10))
+        self.unit = self.write('cassandra-4.1/target/surefire-reports/TEST-TestSuite.xml', self.xml(18))
         os.utime(self.unit, (now + 1, now + 1))
         self.save_summary()
 
@@ -92,7 +97,11 @@ class ReleasePackagingTest(unittest.TestCase):
         manifest = json.loads((target / 'release-manifest.json').read_text())
         self.assertEqual(manifest['commit'], self.commit)
         self.assertEqual(manifest['verification']['e2e_tests'], 90)
+        self.assertEqual(manifest['verification']['secret_e2e_tests'], 48)
+        self.assertTrue(manifest['verification']['real_systemd_credentials'])
         self.assertEqual(len(manifest['artifacts']), 6)
+        self.assertTrue(all(item['secret_e2e_tests'] == 8 and item['real_systemd_credentials']
+                            for item in manifest['artifacts']))
         self.assertNotIn(str(self.root), (target / 'release-manifest.json').read_text())
         for line in (target / 'SHA256SUMS').read_text().splitlines():
             expected, name = line.split('  ')
@@ -101,6 +110,9 @@ class ReleasePackagingTest(unittest.TestCase):
             prefix = 'cassandra-ldap-1.2.0/'
             self.assertIn(prefix + 'conf/ldap.yaml', bundle.namelist())
             self.assertIn(prefix + 'INSTALL.md', bundle.namelist())
+            guide = bundle.read(prefix + 'SECRET_HANDLING.md').decode()
+            self.assertIn('/blob/v1.2.0/molecule/integration/README.md)', guide)
+            self.assertNotIn('](molecule/', guide)
             self.assertFalse(any('.state' in name or 'results.xml' in name for name in bundle.namelist()))
             for line in bundle.read(prefix + 'SHA256SUMS').decode().splitlines():
                 expected, name = line.split('  ')
@@ -155,6 +167,18 @@ class ReleasePackagingTest(unittest.TestCase):
     def test_rejects_missing_e2e_xml(self):
         (self.reports / '4.1.10/results.xml').unlink()
         with self.assertRaises(FileNotFoundError):
+            prepare_release(self.root, 'v1.2.0')
+
+    def test_rejects_missing_real_systemd_evidence(self):
+        self.summary['4.1.10']['systemd_credentials'] = False
+        self.save_summary()
+        with self.assertRaisesRegex(ValueError, 'real systemd credentials'):
+            prepare_release(self.root, 'v1.2.0')
+
+    def test_rejects_failed_secret_tests(self):
+        self.summary['4.1.10']['secret_tests']['failures'] = 1
+        self.save_summary()
+        with self.assertRaisesRegex(ValueError, '8/8'):
             prepare_release(self.root, 'v1.2.0')
 
 

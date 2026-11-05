@@ -14,3 +14,17 @@
         content: "{{ cluster_logs.stdout }}\n{{ cluster_logs.stderr }}"
         dest: "{{ playbook_dir }}/.state/{{ lookup('env', 'CASSANDRA_VERSION') | default('current', true) }}-containers.log"
         mode: '0644'
+    - name: Collect systemd service journals
+      ansible.builtin.command:
+        argv: [docker, compose, -f, "{{ playbook_dir }}/compose.yaml", exec, -T, "{{ item }}", journalctl, -u, cassandra, --no-pager]
+      loop: [cassandra1, cassandra2]
+      register: systemd_journals
+      changed_when: false
+      failed_when: false
+      when: lookup('env', 'LDAP_TEST_SYSTEMD') == 'true'
+    - name: Save systemd journals
+      ansible.builtin.copy:
+        content: "{{ systemd_journals.results | map(attribute='stdout') | join('\n') }}"
+        dest: "{{ playbook_dir }}/.state/{{ lookup('env', 'CASSANDRA_VERSION') | default('current', true) }}-systemd.log"
+        mode: '0644'
+      when: lookup('env', 'LDAP_TEST_SYSTEMD') == 'true'

@@ -1,0 +1,17 @@
+ARG CASSANDRA_SOURCE=cassandra:4.1.10
+FROM ${CASSANDRA_SOURCE} AS distribution
+FROM cassandra:4.1.10
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv dbus \
+    && rm -rf /var/lib/apt/lists/* /opt/cassandra /opt/java/openjdk /etc/cassandra
+# Keep the exact server and Java runtime from each version's tested distribution.
+COPY --from=distribution /opt/cassandra/ /opt/cassandra/
+COPY --from=distribution /opt/java/openjdk/ /opt/java/openjdk/
+COPY --from=distribution /etc/cassandra/ /etc/cassandra/
+COPY --from=distribution /usr/local/bin/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY cassandra.service /etc/systemd/system/cassandra.service
+RUN mkdir -p /etc/systemd/system/multi-user.target.wants \
+    && ln -s /etc/systemd/system/cassandra.service /etc/systemd/system/multi-user.target.wants/cassandra.service \
+    && systemctl mask systemd-resolved.service systemd-networkd.service systemd-networkd-wait-online.service
+ENV container=docker
+STOPSIGNAL SIGRTMIN+3

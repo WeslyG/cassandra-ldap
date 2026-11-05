@@ -7,7 +7,7 @@ JAVA_BUILD_IMAGE ?= maven:3.9.9-eclipse-temurin-17
 
 .PHONY: integration-4.1 integration-4.1-destroy
 
-.PHONY: build-all test-unit test-release check-docs integration-all release-package
+.PHONY: build-all test-unit test-release check-docs integration-all integration-systemd release-package
 
 build-all:
 	docker run --rm -v "$(CURDIR):/work" -w /work $(JAVA_BUILD_IMAGE) mvn -B -s .mvn/matrix-settings.xml -Dmaven.repo.local=/work/.m2/repository -DskipTests -Dmaven.javadoc.skip=true package
@@ -16,7 +16,9 @@ integration-all: build-all
 	$(MAKE) test-unit
 	$(MAKE) test-release
 	$(MAKE) check-docs
-	bash molecule/integration/run.sh matrix
+	LDAP_TEST_SYSTEMD=true bash molecule/integration/run.sh matrix
+
+integration-systemd: integration-all
 
 test-release:
 	docker build -t cassandra-ldap-integration-runner -f molecule/integration/Dockerfile molecule/integration
@@ -31,7 +33,7 @@ check-docs:
 	docker run --rm -v "$(CURDIR):/work:ro" -w /work --entrypoint python3 cassandra-ldap-integration-runner molecule/integration/check_docs.py
 
 test-unit:
-	docker run --rm -v "$(CURDIR):/work" -w /work $(JAVA_BUILD_IMAGE) mvn -B -s .mvn/matrix-settings.xml -Dmaven.repo.local=/work/.m2/repository -pl cassandra-4.1 -am -Dtest=AccessPolicyTest,LDAPSecurityTest,DistributedQueryTest -Dsurefire.failIfNoSpecifiedTests=false test
+	docker run --rm -v "$(CURDIR):/work" -w /work $(JAVA_BUILD_IMAGE) mvn -B -s .mvn/matrix-settings.xml -Dmaven.repo.local=/work/.m2/repository -pl cassandra-4.1 -am -Dtest=AccessPolicyTest,LDAPSecurityTest,DistributedQueryTest,LdapSecretResolverTest -Dsurefire.failIfNoSpecifiedTests=false test
 
 integration-4.1: build-4.1
 	bash molecule/integration/run.sh test

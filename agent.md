@@ -17,7 +17,8 @@ contract, not a changelog.
 - `conf/ldap.yaml`: production-shaped example with a secret placeholder.
 - `conf/access-sync-schema.cql`: operator-provisioned journal schema.
 - `molecule/integration`: shared two-node/OpenLDAP acceptance scenario and matrix.
-- `README.adoc`: installation/configuration; `ACCESS_SYNC.md`: operational rules;
+- `README.adoc`: installation/configuration; `SECRET_HANDLING.md`: secret sources,
+  systemd/Ansible deployment and rotation; `ACCESS_SYNC.md`: operational rules;
   `molecule/integration/README.md`: test commands, coverage and limitations.
 - `RELEASING.md`, `scripts/package_release.py` and `.github/workflows/release.yml`:
   clean-tag, single-invocation verification gates and nine public release assets.
@@ -30,6 +31,9 @@ with both 1.x and 2.x. Do not shade Cassandra, Guava or another YAML runtime.
 ## Security Invariants
 
 - Reject empty/missing passwords and wrong native passwords.
+- Resolve exactly one explicit bind-secret source (inline, ENV, file or systemd
+  credential). Never trim passwords, fall back to another source, log secret
+  values/parser excerpts or include source selectors in policy fingerprints.
 - Refresh LDAP credentials on every login; caches must not bypass LDAP checks.
 - Escape LDAP filter values and CQL literals/identifiers. Never turn a username
   into a raw LDAP filter or interpolate an unescaped DN.
@@ -64,19 +68,27 @@ make test-unit
 make test-release
 make check-docs
 make integration-all
-bash molecule/integration/run.sh matrix 3.0 5.0
+make integration-systemd
+LDAP_TEST_SYSTEMD=true bash molecule/integration/run.sh matrix 3.0 5.0
 ```
 
-`test-unit` selects 10 shared-code tests through the 4.1 classpath, not the embedded
+`test-unit` selects 18 shared-code tests through the 4.1 classpath, not the embedded
 Java integration scaffolding. Maven packaging must force jar recreation so shaded
 outputs cannot retain stale classes. Never rebuild an artifact during its e2e run.
 
 For runtime/shared-code changes run the full six-version matrix. For a version-only
 adapter change run at least its real-cluster scenario plus unit tests, and explain
-what was not rerun. Require idempotence, 15/15 cases, zero skips, both actual server
+what was not rerun. Require idempotence, 15/15 access and 8/8 systemd secret cases,
+zero skips, both actual server
 versions and matching jar hashes. Selective reruns preserve other summaries:
 check artifact hashes instead of treating the aggregate as one fresh invocation.
 Do not claim all cases are proven by compilation or unit tests alone.
+
+Secret-source changes also require `integration-systemd`: both Cassandra nodes
+run as real systemd services with encrypted credentials in a disposable privileged
+container. Never substitute a fake CREDENTIALS_DIRECTORY for that verification.
+The boot script uses `mount --make-rshared /` inside the private container mount
+namespace only. Never apply it to the host or mount host credential/cgroup trees.
 
 Clusters share a fixed project/network/runner name and must run sequentially.
 Seed auth RF=2 precedes node 2 joining; perform full repair before enabling the

@@ -34,11 +34,20 @@ def main():
         env = dict(os.environ, CASSANDRA_IMAGE=config.get('image', f'cassandra:{version}'),
                    CASSANDRA_PLATFORM=native_platform, LDAP_PLUGIN_JAR=str(jar),
                    LDAP_AUTHENTICATOR=config['authenticator'], CASSANDRA_VERSION=version)
+        systemd = os.environ.get('LDAP_TEST_SYSTEMD') == 'true'
+        if systemd:
+            image = f'ldap-integration-systemd:{version}'
+            subprocess.run(['docker', 'build', '-t', image, '--build-arg',
+                            'CASSANDRA_SOURCE=' + env['CASSANDRA_IMAGE'], '-f',
+                            str(HERE / 'Dockerfile.systemd'), str(HERE)], check=True)
+            env.update(CASSANDRA_IMAGE=image, LDAP_STOP_SIGNAL='SIGRTMIN+3')
         directory = reports / version
         directory.mkdir(exist_ok=True)
         report = HERE / '.state' / f'{version}-results.xml'
         server_versions = HERE / '.state' / 'server-versions.json'
         server_versions.unlink(missing_ok=True)
+        secret_report = HERE / '.state' / f'{version}-secrets.xml'
+        secret_report.unlink(missing_ok=True)
         if report.exists():
             report.rename(directory / 'previous-results.xml')
         (directory / 'results.xml').unlink(missing_ok=True)
@@ -53,6 +62,14 @@ def main():
                   'jar_sha256': jar_hash, 'image': env['CASSANDRA_IMAGE'],
                   'platform': native_platform, 'run_id': run_id, 'source_commit': source_commit,
                   'source_dirty': source_dirty, 'started_at': started_at}
+        result['systemd_credentials'] = systemd
+        if secret_report.exists():
+            (directory / 'secrets.xml').write_bytes(secret_report.read_bytes())
+            suites = list(ET.parse(secret_report).getroot().iter('testsuite'))
+            result['secret_tests'] = {field: sum(int(s.attrib.get(field, 0)) for s in suites)
+                                      for field in ('tests', 'failures', 'errors', 'skipped')}
+        if result.get('secret_tests') != {'tests': 8 if systemd else 4, 'failures': 0, 'errors': 0, 'skipped': 0}:
+            result['exit_code'] = result['exit_code'] or 1
         if server_versions.exists():
             result['server_versions'] = json.loads(server_versions.read_text())
         if hashlib.sha256(jar.read_bytes()).hexdigest() != jar_hash:
@@ -66,6 +83,10 @@ def main():
         cluster_log = HERE / '.state' / f'{version}-containers.log'
         if cluster_log.exists():
             (directory / 'containers.log').write_bytes(cluster_log.read_bytes())
+        if systemd:
+            journal = HERE / '.state' / f'{version}-systemd.log'
+            if journal.exists():
+                (directory / 'systemd.log').write_bytes(journal.read_bytes())
         lifecycle = (directory / 'molecule.log').read_text()
         result['idempotence_passed'] = 'idempotence: Executed: Successful' in lifecycle
         result['teardown_passed'] = 'destroy: Executed: Successful' in lifecycle

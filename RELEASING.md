@@ -9,7 +9,7 @@ Each jar name contains both its Cassandra server version and plugin version.
 | Download | Purpose |
 |---|---|
 | Six cassandra-ldap-SERVER-VERSION.jar files | Individual shaded adapters; install only one on a node |
-| cassandra-ldap-VERSION.zip | Complete bundle with all jars, YAML example, journal schema, license, installation instructions and internal checksums |
+| cassandra-ldap-VERSION.zip | Complete bundle with all jars, YAML example, journal schema, secret deployment guide, license, installation instructions and internal checksums |
 | release-manifest.json | Source commit, common e2e invocation ID, test counts, node versions/images/platforms and exact tested jar hashes |
 | SHA256SUMS | SHA-256 for every jar, ZIP and manifest |
 
@@ -23,39 +23,37 @@ example password is REPLACE_WITH_SECRET, not a bind credential.
 1. Update Maven versions, matrix plugin versions, the default Compose jar path
    and README compatibility table. Run documentation and packaging checks.
 2. Commit the sources. Releases require a clean working tree.
-3. Run the complete verification sequence:
+3. Create an annotated stable tag on that exact commit:
 
 ```sh
-make integration-all
+git tag -a v1.3.0 -m "Cassandra LDAP Authenticator v1.3.0"
 ```
 
-4. Create an annotated stable tag on that exact commit:
-
-```sh
-git tag -a v1.2.0 -m "Cassandra LDAP Authenticator v1.2.0"
-```
-
-5. Validate and prepare the local download set:
-
-```sh
-RELEASE_TAG=v1.2.0 make release-package
-```
-
-Output is ignored by Git under dist/v1.2.0/. Existing output is not overwritten.
-Move an earlier local candidate aside before preparing another. Never replace
-already published artifacts or repoint a published release tag.
-
-6. Push the release commit and tag to the intended repository:
+4. Push the release commit and tag to the intended repository:
 
 ```sh
 git push origin master
-git push origin v1.2.0
+git push origin v1.3.0
 ```
 
-The tag-triggered GitHub workflow rebuilds and verifies its own files. Local
-evidence is not substituted for that fresh run. Rebuilding can change jar hashes;
-evidence must match the files being released. ZIP entries use the commit timestamp
-and fixed permissions, without local filesystem ownership metadata.
+5. Follow the tag-triggered workflow through verification and publication. It
+   builds all jars, runs unit/packaging/documentation checks, tests the full
+   six-version systemd matrix from the clean tagged commit and packages exactly
+   those tested jars. The release becomes Latest only after remote byte checks.
+
+Local preparation uses the same gates and is optional when CI performs the full
+sequence. From the clean tagged commit run:
+
+```sh
+make integration-all
+RELEASE_TAG=v1.3.0 make release-package
+```
+
+Output is ignored by Git under dist/v1.3.0/. Existing output is not overwritten.
+Never replace published artifacts or repoint a published release tag. Local
+evidence is not substituted for the fresh CI run. Rebuilding can change jar
+hashes; evidence must match the files being released. ZIP entries use the commit
+timestamp and fixed permissions, without local filesystem ownership metadata.
 
 ## Verification Gates
 
@@ -65,8 +63,9 @@ failed/skipped cases, wrong actual node versions and modified jars. It checks
 shared plugin classes and embedded Maven metadata, and rejects artifacts bundling
 Cassandra CQL classes, Guava or SnakeYAML.
 
-All six adapters must pass 15/15 cases in one full matrix invocation from this
-clean commit, with matching hashes, idempotence and teardown. The 10 Java unit
+All six adapters must pass 15/15 access cases and 8/8 secret-source cases under
+real systemd in one full matrix invocation from the clean tagged commit, with
+matching hashes, idempotence and teardown. The 18 Java unit
 tests must run after jar packaging and before the matrix. Selective reruns help
 development but cannot combine unrelated results into release evidence.
 
@@ -75,11 +74,12 @@ make test-release
 make check-docs
 ```
 
-The 10 packaging unit tests use synthetic temporary repositories, jars and reports.
+The 12 packaging unit tests use synthetic temporary repositories, jars and reports.
 They verify successful packaging/checksums and rejection of changed jars, skipped
 e2e, wrong node versions, mixed runs, dirty/different commits, wrong versions,
-stale unit reports and missing XML. They are separate from the 10 Java tests
-and 90 live-cluster checks.
+stale unit reports, missing XML and absent/failed systemd secret tests. These
+12 packaging tests are separate from the 18 Java tests, 90 live-cluster access
+checks and 48 secret-source checks described in [the integration guide](molecule/integration/README.md).
 
 ## Workflow and Permissions
 

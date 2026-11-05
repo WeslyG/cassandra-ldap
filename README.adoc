@@ -12,12 +12,12 @@ adopting unrelated manual assignments.
 [cols="1,1,1,2",options="header"]
 |===
 |Module |Cassandra |Plugin artifact version |Authenticator
-|cassandra-2.2 |2.2.19 |1.2.0 |Cassandra22LDAPAuthenticator
-|cassandra-3.0 |3.0.31 |1.2.0 |Cassandra30LDAPAuthenticator
-|cassandra-3.11 |3.11.18 |1.2.0 |LDAPAuthenticator
-|cassandra-4.0 |4.0.16 |1.2.0 |LDAPAuthenticator
-|cassandra-4.1 |4.1.10 |1.2.0 |LDAPAuthenticator
-|cassandra-5.0 |5.0.6 |1.2.0 |LDAPAuthenticator
+|cassandra-2.2 |2.2.19 |1.3.0 |Cassandra22LDAPAuthenticator
+|cassandra-3.0 |3.0.31 |1.3.0 |Cassandra30LDAPAuthenticator
+|cassandra-3.11 |3.11.18 |1.3.0 |LDAPAuthenticator
+|cassandra-4.0 |4.0.16 |1.3.0 |LDAPAuthenticator
+|cassandra-4.1 |4.1.10 |1.3.0 |LDAPAuthenticator
+|cassandra-5.0 |5.0.6 |1.3.0 |LDAPAuthenticator
 |===
 
 Compatibility is tested against these exact releases. Compatibility with other
@@ -38,10 +38,10 @@ make integration-all
 ----
 
 * `build-all` packages all six plugins using Maven 3.9.9 and Java 17.
-* `test-unit` runs the 10 focused policy, LDAP-security and CQL-escaping tests.
-* `test-release` runs 10 isolated tests of artifact packaging and evidence guards.
+* `test-unit` runs 18 focused policy, LDAP-security, secret-source and CQL-escaping tests.
+* `test-release` runs 12 isolated tests of artifact packaging and evidence guards.
 * `check-docs` checks configuration examples/defaults, module versions, local links and test counts without live services.
-* `integration-all` builds, runs unit/documentation checks, then tests all adapters in real clusters.
+* `integration-all` (also `integration-systemd`) builds, runs unit/packaging/documentation checks, then tests all adapters in real clusters under systemd with encrypted credentials. It uses disposable privileged test containers; run only on a trusted Docker host.
 
 The build uses the public Maven Central Google mirror configured in
 link:.mvn/matrix-settings.xml[the Maven settings]. It contains no credentials.
@@ -158,18 +158,22 @@ group_role_mappings:
 ----
 
 LDAP connection fields are flat top-level keys. Secret deployment can therefore
-manage `ldap_service_password` independently without inserting an indented block.
-The loader does not interpolate environment variables or decrypt vault values:
-deployment tooling must render the final YAML. Restrict file permissions, use
-Ansible Vault or a secret store, and suppress secret-task output/diffs. Do not
-commit rendered production YAML.
+select a password source without inserting an indented block. Configure exactly
+one of the four password keys below, removing the others entirely (including
+null/empty keys). There is no fallback between secret sources. The loader does
+not expand `${VARIABLE}` expressions or decrypt Ansible Vault values.
+link:SECRET_HANDLING.md[Secret deployment] describes systemd encrypted credentials
+(recommended), EnvironmentFile, secret files, rotation and Ansible operation.
 
 [cols="2,1,4",options="header"]
 |===
 |Key |Default |Meaning
 |ldap_uri |Required |LDAP/LDAPS URI, including the search base DN.
 |ldap_service_dn |Required |Directory bind identity used for user/group lookup.
-|ldap_service_password |Required |Nonempty directory bind password.
+|ldap_service_password |Exclusive source |Literal nonempty directory bind password; spaces are significant.
+|ldap_service_password_env |Exclusive source |Name of an environment variable containing the password, not its value.
+|ldap_service_password_file |Exclusive source |Absolute path to a UTF-8 secret file.
+|ldap_service_password_credential |Exclusive source |Credential name within systemd's CREDENTIALS_DIRECTORY.
 |ldap_filter_template |(cn=%s) |Search filter; login values are escaped before substitution.
 |group_role_mappings |Required |Nonempty list of group DNs and Cassandra targets.
 |ldap_context_factory |com.sun.jndi.ldap.LdapCtxFactory |JNDI context factory.
