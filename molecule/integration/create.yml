@@ -13,7 +13,7 @@
         content: bootstrap
         dest: "{{ playbook_dir }}/.state/mode"
         force: false
-        mode: '0600'
+        mode: '0644'
     - name: Install fixture policy
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/ldap.yaml"

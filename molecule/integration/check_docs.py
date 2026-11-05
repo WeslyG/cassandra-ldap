@@ -84,6 +84,12 @@ def main():
                 'Update documented secret-source e2e counts and matrix acceptance guard')
     for key in ('PASSWORD_KEY', 'PASSWORD_ENV_KEY', 'PASSWORD_FILE_KEY', 'PASSWORD_CREDENTIAL_KEY'):
         require(f'|{constants[key]} |Exclusive source |' in readme, 'Undocumented password source')
+    for playbook in ('create.yml', 'destroy.yml'):
+        tasks = yaml.safe_load((SCENARIO / playbook).read_text())[0]['tasks']
+        mode_tasks = [task['ansible.builtin.copy'] for task in tasks
+                      if task.get('ansible.builtin.copy', {}).get('dest', '').endswith('/.state/mode')]
+        require(len(mode_tasks) == 1 and mode_tasks[0]['mode'] == '0644',
+                'The nonsecret mode marker must be readable by the Cassandra service user')
     print('Documentation valid: YAML/defaults, six adapters, links, 18 unit, 15 access and 4/8 secret e2e cases.')
 
 

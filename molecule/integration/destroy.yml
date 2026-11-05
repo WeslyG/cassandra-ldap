@@ -16,7 +16,7 @@
       ansible.builtin.copy:
         content: bootstrap
         dest: "{{ playbook_dir }}/.state/mode"
-        mode: '0600'
+        mode: '0644'
     - name: Reset policy fixture
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/ldap.yaml"

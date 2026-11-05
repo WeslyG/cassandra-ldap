@@ -87,6 +87,12 @@ public class LdapSecretResolverTest
             }
             Files.write(file, " a\n\n".getBytes(StandardCharsets.UTF_8));
             assertEquals(resolve("_file", file.toString(), Collections.emptyMap()), " a\n");
+            for (String ending : new String[]{"\r", "\n", "\r\n"})
+            {
+                String password = "secret" + ending;
+                Files.write(file, (password + "\r\n").getBytes(StandardCharsets.UTF_8));
+                assertEquals(resolve("_file", file.toString(), Collections.emptyMap()), password);
+            }
             String boundary = String.join("", Collections.nCopies(65536, "x"));
             Files.write(file, boundary.getBytes(StandardCharsets.UTF_8));
             assertEquals(resolve("_file", file.toString(), Collections.emptyMap()), boundary);

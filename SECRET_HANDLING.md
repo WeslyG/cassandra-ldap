@@ -14,8 +14,10 @@ No automatic environment substitution, source precedence or fallback occurs.
 The configured value must be a nonempty YAML string. Passwords are not trimmed:
 leading/trailing spaces are significant. File and credential sources remove
 exactly one terminal LF or CRLF; inline/ENV sources preserve terminal newlines.
-Prefer generating files with no newline, especially if a newline belongs to the
-password. Values must be nonempty, contain no NUL and fit in 65536 UTF-8 bytes
+Generate files without an editor-added newline. To preserve an intentional
+terminal CR or LF in the password, append one additional CRLF terminator to the
+file, or use inline/ENV (which performs no newline removal).
+Values must be nonempty, contain no NUL and fit in 65536 UTF-8 bytes
 (file limit includes the optional terminal newline). Invalid UTF-8 files fail.
 Use quoted strings for inline YAML values that resemble numbers/booleans.
 

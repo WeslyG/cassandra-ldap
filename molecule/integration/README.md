@@ -247,6 +247,11 @@ mismatches and QUORUM unavailability. Distinguish them from unexpected linkage
 errors or failing JUnit cases. Raw logs can contain workspace paths and node
 addresses; inspect/redact before sharing. Do not commit logs or rendered state.
 
+The nonsecret `.state/mode` marker is mode 0644 so the systemd service user can
+read it on native Linux filesystems. Secret files retain their restricted modes.
+macOS Docker bind mounts can map file ownership differently; they are not a
+substitute for testing Unix permissions on a Linux-native filesystem.
+
 ## Scope
 
 OpenLDAP verifies direct membership through member/uniqueMember and directory
