@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SCENARIO = ROOT / 'molecule/cassandra41'
+SCENARIO = ROOT / 'molecule/integration'
 
 
 def require(condition, message):
@@ -52,7 +52,7 @@ def main():
         row = f'|cassandra-{module} |{version} |{config["plugin_version"]} |{config["authenticator"]}'
         require(row in readme, module + ': README version table drift')
 
-    docs = [ROOT / name for name in ('README.adoc', 'ACCESS_SYNC.md', 'agent.md', 'AGENTS.md')]
+    docs = [ROOT / name for name in ('README.adoc', 'ACCESS_SYNC.md', 'RELEASING.md', 'agent.md', 'AGENTS.md')]
     docs.append(SCENARIO / 'README.md')
     for doc in docs:
         text = doc.read_text()

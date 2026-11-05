@@ -2,7 +2,7 @@
 
 ## Requirements and Isolation
 
-The scenario name is `cassandra41`; `matrix.json` selects the version adapters.
+The scenario name is `integration`; `matrix.json` selects the version adapters.
 Run commands from the repository root on a host with Docker Compose v2, Bash,
 Make, registry access and sufficient Docker resources. Allow at least 4 GB of
 Docker memory for the test cluster; 6-8 GB is preferable when other services run.
@@ -21,7 +21,7 @@ directly to each selected node; queries use QUORUM.
 The runner mounts the Docker socket and repository. This gives it control over
 the host Docker daemon: run only trusted code, without production credentials.
 The Compose project, runner and network use the fixed name prefix
-`ldap41-integration`. Do not run multiple copies or versions concurrently.
+`cassandra-ldap-integration`. Do not run multiple copies or versions concurrently.
 Published LDAP/CQL ports are random and bound to loopback. The external network
 is retained after teardown; test containers and volumes are disposable.
 
@@ -41,20 +41,21 @@ Individual stages:
 ```sh
 make build-all
 make test-unit
+make test-release
 make check-docs
-bash molecule/cassandra41/run.sh matrix
+bash molecule/integration/run.sh matrix
 ```
 
 Retest selected adapters without rebuilding jars:
 
 ```sh
-bash molecule/cassandra41/run.sh matrix 3.0 5.0
+bash molecule/integration/run.sh matrix 3.0 5.0
 ```
 
 Run just the default 4.1 scenario using a prebuilt 4.1 jar:
 
 ```sh
-bash molecule/cassandra41/run.sh test
+bash molecule/integration/run.sh test
 ```
 
 `make integration-4.1` combines the local-JDK 4.1 build and that scenario.
@@ -178,6 +179,10 @@ Matrix reports are ignored by Git and live in `.state/reports/`:
 A selective rerun preserves results for other versions, so aggregate entries
 need not come from the same invocation. Compare jar hashes to the current
 artifacts before reusing evidence. A build alone is not an e2e pass.
+A release additionally requires a common run ID from one full invocation, the
+same clean source commit, both actual node versions, idempotence and teardown.
+The matrix records this provenance; selective development runs do not satisfy
+the release gate. See [Releasing](../../RELEASING.md).
 A failed bootstrap may have no results.xml; the exit code and logs remain
 essential. Failed tests can affect later cases because this suite intentionally
 exercises one user's lifecycle in order; diagnose the first failure first.

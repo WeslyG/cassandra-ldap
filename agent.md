@@ -16,9 +16,11 @@ contract, not a changelog.
   adapters and ServiceLoader descriptors. Only one adapter jar belongs on a node.
 - `conf/ldap.yaml`: production-shaped example with a secret placeholder.
 - `conf/access-sync-schema.cql`: operator-provisioned journal schema.
-- `molecule/cassandra41`: shared two-node/OpenLDAP acceptance scenario and matrix.
+- `molecule/integration`: shared two-node/OpenLDAP acceptance scenario and matrix.
 - `README.adoc`: installation/configuration; `ACCESS_SYNC.md`: operational rules;
-  `molecule/cassandra41/README.md`: test commands, coverage and limitations.
+  `molecule/integration/README.md`: test commands, coverage and limitations.
+- `RELEASING.md`, `scripts/package_release.py` and `.github/workflows/release.yml`:
+  clean-tag, single-invocation verification gates and nine public release assets.
 
 The shared base compiles against provided Cassandra 3.0.31 and Java 8 bytecode.
 Do not introduce newer JDK APIs into it. Cassandra API differences belong in the
@@ -59,9 +61,10 @@ use only trusted code and disposable credentials.
 ```sh
 make build-all
 make test-unit
+make test-release
 make check-docs
 make integration-all
-bash molecule/cassandra41/run.sh matrix 3.0 5.0
+bash molecule/integration/run.sh matrix 3.0 5.0
 ```
 
 `test-unit` selects 10 shared-code tests through the 4.1 classpath, not the embedded
@@ -107,3 +110,14 @@ to remove public author metadata. If a real secret is found in history, stop
 publication and arrange rotation and an explicit history-cleanup plan.
 Push only to the user's intended remote/branch, never the upstream repository
 by assumption. Never commit an unrelated user's change without inspecting it.
+
+## Releases
+
+Keep all Maven and matrix artifact versions aligned with the stable release tag.
+Run the full matrix from the clean release commit; do not combine selective runs
+or reuse evidence after rebuilding jars. Run `make test-release` and package only
+after the Java unit report and all six live-cluster reports pass.
+The package must not contain raw logs, XML, workstation paths or real secrets.
+Never repoint a published tag or replace published assets. GitHub publication
+runs separately from Docker verification with contents-write permission scoped
+only to the publish job, and checks downloaded asset bytes before publishing.

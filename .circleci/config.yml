@@ -11,9 +11,9 @@ jobs:
           command: make integration-all
           no_output_timeout: 40m
       - store_test_results:
-          path: molecule/cassandra41/.state/reports
+          path: molecule/integration/.state/reports
       - store_artifacts:
-          path: molecule/cassandra41/.state/reports
+          path: molecule/integration/.state/reports
           destination: cluster-reports
       - store_artifacts:
           path: cassandra-4.1/target/surefire-reports

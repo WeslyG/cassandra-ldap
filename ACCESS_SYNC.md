@@ -161,7 +161,7 @@ number of users and lock contention contribute to revocation latency. A running
 query is not cancelled. For urgent revocation perform the administrative revoke
 and invalidate relevant caches on every node, and verify existing connections.
 
-[The integration guide](molecule/cassandra41/README.md) documents the two-node
+[The integration guide](molecule/integration/README.md) documents the two-node
 OpenLDAP matrix, actual permission checks, idempotence, jar hashes and reports.
 Those tests do not validate AD-specific behavior, multi-DC operation, TLS setup,
 production load or every in-flight crash/network ordering.

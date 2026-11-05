@@ -35,8 +35,8 @@ def port(node):
 
 @contextlib.contextmanager
 def connection(node='cassandra1', username='cassandra', password='cassandra'):
-    address = socket.gethostbyname(node) if os.environ.get('LDAP41_RUNNER') else '127.0.0.1'
-    native_port = 9042 if os.environ.get('LDAP41_RUNNER') else port(node)
+    address = socket.gethostbyname(node) if os.environ.get('LDAP_INTEGRATION_RUNNER') else '127.0.0.1'
+    native_port = 9042 if os.environ.get('LDAP_INTEGRATION_RUNNER') else port(node)
     cluster = Cluster([address], port=native_port, protocol_version=4,
                       auth_provider=PlainTextAuthProvider(username, password),
                       load_balancing_policy=WhiteListRoundRobinPolicy([address]),

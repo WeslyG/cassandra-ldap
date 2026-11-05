@@ -6,6 +6,7 @@ import pathlib
 import subprocess
 import sys
 import time
+import uuid
 import xml.etree.ElementTree as ET
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -20,6 +21,10 @@ def main():
     reports.mkdir(parents=True, exist_ok=True)
     summary_file = reports / 'summary.json'
     summary = json.loads(summary_file.read_text()) if summary_file.exists() else {}
+    git = ['git', '-c', f'safe.directory={ROOT}', '-C', str(ROOT)]
+    source_commit = subprocess.check_output([*git, 'rev-parse', 'HEAD'], text=True).strip()
+    source_dirty = bool(subprocess.check_output([*git, 'status', '--porcelain'], text=True).strip())
+    run_id = uuid.uuid4().hex
     for module in selected:
         config = versions[module]
         version = config['version']
@@ -36,14 +41,18 @@ def main():
         server_versions.unlink(missing_ok=True)
         if report.exists():
             report.rename(directory / 'previous-results.xml')
+        (directory / 'results.xml').unlink(missing_ok=True)
         print(f'=== Cassandra {version}: two nodes + LDAP ===', flush=True)
         jar_hash = hashlib.sha256(jar.read_bytes()).hexdigest()
         start = time.monotonic()
+        started_at = time.time()
         with (directory / 'molecule.log').open('w') as output:
-            run = subprocess.run(['molecule', 'test', '-s', 'cassandra41'], cwd=ROOT,
+            run = subprocess.run(['molecule', 'test', '-s', 'integration'], cwd=ROOT,
                                  env=env, stdout=output, stderr=subprocess.STDOUT)
         result = {'exit_code': run.returncode, 'elapsed_seconds': round(time.monotonic() - start, 1),
-                  'jar_sha256': jar_hash, 'image': env['CASSANDRA_IMAGE']}
+                  'jar_sha256': jar_hash, 'image': env['CASSANDRA_IMAGE'],
+                  'platform': native_platform, 'run_id': run_id, 'source_commit': source_commit,
+                  'source_dirty': source_dirty, 'started_at': started_at}
         if server_versions.exists():
             result['server_versions'] = json.loads(server_versions.read_text())
         if hashlib.sha256(jar.read_bytes()).hexdigest() != jar_hash:
@@ -57,6 +66,13 @@ def main():
         cluster_log = HERE / '.state' / f'{version}-containers.log'
         if cluster_log.exists():
             (directory / 'containers.log').write_bytes(cluster_log.read_bytes())
+        lifecycle = (directory / 'molecule.log').read_text()
+        result['idempotence_passed'] = 'idempotence: Executed: Successful' in lifecycle
+        result['teardown_passed'] = 'destroy: Executed: Successful' in lifecycle
+        if (result.get('tests') != 15 or any(result.get(field, -1) != 0 for field in ('failures', 'errors', 'skipped'))
+                or result.get('server_versions') != {'cassandra1': version, 'cassandra2': version}
+                or not result['idempotence_passed'] or not result['teardown_passed']):
+            result['exit_code'] = result['exit_code'] or 1
         summary[version] = result
         (directory / 'summary.json').write_text(json.dumps(result, indent=2) + '\n')
         summary_file.write_text(json.dumps(summary, indent=2) + '\n')

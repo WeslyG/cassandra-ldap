@@ -34,7 +34,7 @@ target
 
 .m2
 .venv-integration/
-molecule/cassandra41/.state/
+molecule/integration/.state/
 .pytest_cache/
 __pycache__/
 
@@ -52,3 +52,4 @@ conf/ldap.local*.yaml
 secrets/
 .DS_Store
 Thumbs.db
+dist/

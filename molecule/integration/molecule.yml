@@ -1,7 +1,7 @@
 driver:
   name: default
 platforms:
-  - name: ldap41-integration
+  - name: cassandra-ldap-integration
     managed: false
 provisioner:
   name: ansible

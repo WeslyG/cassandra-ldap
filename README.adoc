@@ -12,12 +12,12 @@ adopting unrelated manual assignments.
 [cols="1,1,1,2",options="header"]
 |===
 |Module |Cassandra |Plugin artifact version |Authenticator
-|cassandra-2.2 |2.2.19 |1.0.0 |Cassandra22LDAPAuthenticator
-|cassandra-3.0 |3.0.31 |1.0.0 |Cassandra30LDAPAuthenticator
-|cassandra-3.11 |3.11.18 |1.0.0 |LDAPAuthenticator
-|cassandra-4.0 |4.0.16 |1.0.0 |LDAPAuthenticator
-|cassandra-4.1 |4.1.10 |1.1.0 |LDAPAuthenticator
-|cassandra-5.0 |5.0.6 |1.0.0 |LDAPAuthenticator
+|cassandra-2.2 |2.2.19 |1.2.0 |Cassandra22LDAPAuthenticator
+|cassandra-3.0 |3.0.31 |1.2.0 |Cassandra30LDAPAuthenticator
+|cassandra-3.11 |3.11.18 |1.2.0 |LDAPAuthenticator
+|cassandra-4.0 |4.0.16 |1.2.0 |LDAPAuthenticator
+|cassandra-4.1 |4.1.10 |1.2.0 |LDAPAuthenticator
+|cassandra-5.0 |5.0.6 |1.2.0 |LDAPAuthenticator
 |===
 
 Compatibility is tested against these exact releases. Compatibility with other
@@ -39,6 +39,7 @@ make integration-all
 
 * `build-all` packages all six plugins using Maven 3.9.9 and Java 17.
 * `test-unit` runs the 10 focused policy, LDAP-security and CQL-escaping tests.
+* `test-release` runs 10 isolated tests of artifact packaging and evidence guards.
 * `check-docs` checks configuration examples/defaults, module versions, local links and test counts without live services.
 * `integration-all` builds, runs unit/documentation checks, then tests all adapters in real clusters.
 
@@ -53,7 +54,19 @@ For a local 4.1 build, install a compatible JDK and configure `JAVA_HOME` or put
 and 4.1 build directories. Container builds do not require a host JDK.
 Runtime Java comes from the Cassandra installation, not the Java 17 build image.
 
-See link:molecule/cassandra41/README.md[Testing] for topology, commands, coverage,
+== Download a release
+
+Download the matching shaded jar from
+https://github.com/WeslyG/cassandra-ldap/releases[GitHub Releases], or use the
+complete ZIP bundle with all adapters, configuration and installation guidance.
+Each release includes SHA256SUMS and a manifest tying the files to one clean
+source commit and a complete six-version cluster test run. Install only one
+adapter jar per node. Verify checksums before deployment.
+
+For maintainers, link:RELEASING.md[the release guide] describes versioning,
+verification gates, artifact contents and draft-to-published automation.
+
+See link:molecule/integration/README.md[Testing] for topology, commands, coverage,
 reports, failure diagnosis and the 2.2 test-runtime details.
 
 == Installation
@@ -230,7 +243,7 @@ DefaultLDAPServer lookup; a custom retriever alone does not replace that path.
 
 == Repository hygiene
 
-The credentials in `molecule/cassandra41` and Java test resources are disposable
+The credentials in `molecule/integration` and Java test resources are disposable
 fixtures for `example.org` or loopback services. They are not production secrets.
 Build outputs, local Maven caches and raw integration reports are ignored by Git.
 Reports may contain local paths, node addresses and synthetic DNs; review and
