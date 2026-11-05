@@ -221,10 +221,16 @@ Verification scope: {base}/blob/{tag}/molecule/integration/README.md
     files[bundle_name] = stream.getvalue()
     files['SHA256SUMS'] = checksums(files)
     files['RELEASE_NOTES.md'] = notes.encode()
-    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.parent.exists():
+        target.parent.mkdir(parents=True)
+        target.parent.chmod(0o755)
     with tempfile.TemporaryDirectory(dir=target.parent, prefix='.package-') as staging:
         for name, data in files.items():
-            (pathlib.Path(staging) / name).write_bytes(data)
+            path = pathlib.Path(staging) / name
+            path.write_bytes(data)
+            path.chmod(0o644)
+        # Docker builds run as root; host-side artifact upload runs as the runner user.
+        pathlib.Path(staging).chmod(0o755)
         pathlib.Path(staging).rename(target)
     return target
 

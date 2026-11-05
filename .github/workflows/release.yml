@@ -15,7 +15,8 @@ permissions:
 
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
-  cancel-in-progress: false
+  # A new push supersedes verification of an unpublished candidate; manual retries queue.
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 env:
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}

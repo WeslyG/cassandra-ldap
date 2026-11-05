@@ -80,7 +80,14 @@ class ReleasePackagingTest(unittest.TestCase):
         self.write('molecule/integration/.state/reports/summary.json', json.dumps(self.summary))
 
     def test_packages_only_public_verified_assets(self):
-        target = prepare_release(self.root, 'v1.2.0')
+        previous_umask = os.umask(0o077)
+        try:
+            target = prepare_release(self.root, 'v1.2.0')
+        finally:
+            os.umask(previous_umask)
+        self.assertEqual(target.stat().st_mode & 0o777, 0o755)
+        self.assertEqual(target.parent.stat().st_mode & 0o777, 0o755)
+        self.assertTrue(all(path.stat().st_mode & 0o777 == 0o644 for path in target.iterdir()))
         self.assertEqual(len(list(target.iterdir())), 10)
         manifest = json.loads((target / 'release-manifest.json').read_text())
         self.assertEqual(manifest['commit'], self.commit)
