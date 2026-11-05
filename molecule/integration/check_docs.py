@@ -53,7 +53,7 @@ def main():
         row = f'|cassandra-{module} |{version} |{config["plugin_version"]} |{config["authenticator"]}'
         require(row in readme, module + ': README version table drift')
 
-    docs = [ROOT / name for name in ('README.adoc', 'ACCESS_SYNC.md', 'SECRET_HANDLING.md', 'RELEASING.md', 'agent.md', 'AGENTS.md')]
+    docs = [ROOT / name for name in ('README.adoc', 'ACCESS_SYNC.md', 'SECRET_HANDLING.md', 'RELEASING.md', 'CHANGELOG.md', 'agent.md', 'AGENTS.md')]
     docs.append(SCENARIO / 'README.md')
     for doc in docs:
         text = doc.read_text()
@@ -75,6 +75,11 @@ def main():
                                cwd=ROOT, text=True, capture_output=True, check=True)
     require(re.search(r'\b15 tests collected\b', collected.stdout) is not None,
             'Update documented e2e counts and matrix acceptance guard')
+    collected = subprocess.run([sys.executable, '-m', 'pytest', '--collect-only', '-q',
+                                '-p', 'no:cacheprovider', str(SCENARIO / 'test_bind_role.py')],
+                               cwd=ROOT, text=True, capture_output=True, check=True)
+    require(re.search(r'\b3 tests collected\b', collected.stdout) is not None,
+            'Update documented bind-role regression counts and matrix acceptance guard')
     for systemd, count in [('false', 4), ('true', 8)]:
         collected = subprocess.run([sys.executable, '-m', 'pytest', '--collect-only', '-q',
                                     '-p', 'no:cacheprovider', str(SCENARIO / 'test_secrets.py')],
@@ -90,7 +95,7 @@ def main():
                       if task.get('ansible.builtin.copy', {}).get('dest', '').endswith('/.state/mode')]
         require(len(mode_tasks) == 1 and mode_tasks[0]['mode'] == '0644',
                 'The nonsecret mode marker must be readable by the Cassandra service user')
-    print('Documentation valid: YAML/defaults, six adapters, links, 18 unit, 15 access and 4/8 secret e2e cases.')
+    print('Documentation valid: YAML/defaults, six adapters, links, 18 unit, 3 bind, 15 access and 4/8 secret e2e cases.')
 
 
 if __name__ == '__main__':

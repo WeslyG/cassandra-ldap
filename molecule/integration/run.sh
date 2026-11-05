@@ -7,7 +7,12 @@ if ! docker network inspect cassandra-ldap-integration_default >/dev/null 2>&1; 
   docker network create --label cassandra-ldap.scope=integration cassandra-ldap-integration_default
 fi
 entrypoint=molecule
-if [ "${1:-}" = matrix ]; then
+if [ "${1:-}" = superuser ]; then
+  shift
+  docker build -t ldap-integration-cassandra:2.2.19 -f molecule/integration/Dockerfile.cassandra22 molecule/integration
+  entrypoint=python3
+  set -- "$root/molecule/integration/superuser_experiment.py" "$@"
+elif [ "${1:-}" = matrix ]; then
   shift
   docker build -t ldap-integration-cassandra:2.2.19 -f molecule/integration/Dockerfile.cassandra22 molecule/integration
   entrypoint=python3

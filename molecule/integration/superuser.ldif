@@ -1,0 +1,12 @@
+# Public disposable fixture; ordinary LDAP identity, not the OpenLDAP root DN.
+dn: cn=svc_ldap,dc=example,dc=org
+objectClass: inetOrgPerson
+cn: svc_ldap
+sn: Service
+uid: svc_ldap
+userPassword: admin
+
+dn: cn=readers,dc=example,dc=org
+changetype: modify
+add: member
+member: cn=svc_ldap,dc=example,dc=org

@@ -48,6 +48,8 @@ def main():
         server_versions.unlink(missing_ok=True)
         secret_report = HERE / '.state' / f'{version}-secrets.xml'
         secret_report.unlink(missing_ok=True)
+        bind_report = HERE / '.state' / f'{version}-bind.xml'
+        bind_report.unlink(missing_ok=True)
         if report.exists():
             report.rename(directory / 'previous-results.xml')
         (directory / 'results.xml').unlink(missing_ok=True)
@@ -63,6 +65,13 @@ def main():
                   'platform': native_platform, 'run_id': run_id, 'source_commit': source_commit,
                   'source_dirty': source_dirty, 'started_at': started_at}
         result['systemd_credentials'] = systemd
+        if bind_report.exists():
+            (directory / 'bind.xml').write_bytes(bind_report.read_bytes())
+            suites = list(ET.parse(bind_report).getroot().iter('testsuite'))
+            result['bind_tests'] = {field: sum(int(s.attrib.get(field, 0)) for s in suites)
+                                    for field in ('tests', 'failures', 'errors', 'skipped')}
+        if result.get('bind_tests') != {'tests': 3, 'failures': 0, 'errors': 0, 'skipped': 0}:
+            result['exit_code'] = result['exit_code'] or 1
         if secret_report.exists():
             (directory / 'secrets.xml').write_bytes(secret_report.read_bytes())
             suites = list(ET.parse(secret_report).getroot().iter('testsuite'))

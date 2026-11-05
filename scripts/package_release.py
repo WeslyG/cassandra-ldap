@@ -54,6 +54,20 @@ def repository_slug(root, supplied):
     return slug
 
 
+def release_changes(root, version):
+    changelog = (root / 'CHANGELOG.md').read_text()
+    headings = list(re.finditer(r'^## (\d+\.\d+\.\d+) - (\d{4}-\d{2}-\d{2})[ \t]*$', changelog, re.M))
+    matching = [heading for heading in headings if heading.group(1) == version]
+    require(len(matching) == 1, 'Changelog must contain exactly one dated entry for the release version')
+    heading = matching[0]
+    datetime.strptime(heading.group(2), '%Y-%m-%d')
+    following = re.search(r'^## ', changelog[heading.end():], re.M)
+    end = heading.end() + following.start() if following else len(changelog)
+    section = changelog[heading.end():end].strip()
+    require(re.search(r'^- \S', section, re.M), 'Changelog release entry must contain changes')
+    return section
+
+
 def prepare_release(root, tag, repository=None):
     root = pathlib.Path(root).resolve()
     require(re.fullmatch(r'v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)', tag), 'Expected a stable vMAJOR.MINOR.PATCH tag')
@@ -67,6 +81,7 @@ def prepare_release(root, tag, repository=None):
     slug = repository_slug(root, repository)
     target = root / 'dist' / tag
     require(not target.exists(), 'Release output already exists; do not overwrite a prepared release')
+    changes = release_changes(root, version)
 
     scenario = root / 'molecule/integration'
     matrix = json.loads((scenario / 'matrix.json').read_text())
@@ -104,85 +119,30 @@ def prepare_release(root, tag, repository=None):
     files['release-manifest.json'] = (json.dumps(manifest, indent=2, sort_keys=True) + '\n').encode()
     base = f'https://github.com/{slug}'
     download = f'{base}/releases/download/{tag}'
-    table = '\n'.join(f'| {item["cassandra_version"]} | [{item["filename"]}]({download}/{item["filename"]}) |' for item in artifacts)
     bundle_name = f'cassandra-ldap-{version}.zip'
+    def source_links(text):
+        return re.sub(r'\]\(([^)]+)\)',
+                      lambda match: match.group(0) if re.match(r'^(?:[a-z]+:|#)', match[1])
+                      else f']({base}/blob/{tag}/{match[1]})', text)
     notes = f'''# Cassandra LDAP Authenticator {tag}
 
-LDAP authentication and managed access synchronization for **Cassandra 2.2 through 5.0**.
+{source_links(changes)}
 
 ## Downloads
 
-Choose **one jar matching your Cassandra release**, or download the
-[complete bundle]({download}/{bundle_name}) with all adapters, configuration,
-journal schema, license and installation instructions.
+[Complete bundle]({download}/{bundle_name}) or one matching jar from Assets below.
+[SHA256SUMS]({download}/SHA256SUMS) and [manifest]({download}/release-manifest.json).
 
-| Cassandra | Plugin jar |
-|---|---|
-{table}
+## Verification
 
-[SHA256SUMS]({download}/SHA256SUMS) verifies every downloadable artifact.
-[release-manifest.json]({download}/release-manifest.json) records the source commit,
-built jar hashes and the verification scope.
-
-## Access Model
-
-- Flat LDAP connection settings and structured YAML group mappings.
-- Union of direct LDAP groups into Cassandra role memberships and keyspace permissions.
-- Managed GRANT/REVOKE synchronization with a write-ahead ownership journal.
-- Preservation of unrelated manual grants and background reconciliation.
-- Fresh LDAP credential verification, escaped LDAP/CQL values and fail-closed synchronization.
-- Native administrator access for recovery when LDAP is unavailable.
-
-## Bind Secrets
-
-Choose exactly one password source in `ldap.yaml`:
-
-| Source | Configuration key |
-|---|---|
-| Encrypted systemd credential (recommended) | `ldap_service_password_credential` |
-| Process environment | `ldap_service_password_env` |
-| Mounted UTF-8 secret file | `ldap_service_password_file` |
-| Inline YAML literal | `ldap_service_password` |
-
-See [secret deployment]({base}/blob/{tag}/SECRET_HANDLING.md) for
-`LoadCredentialEncrypted=`, EnvironmentFile, Ansible operation and rolling rotation.
-Conflicting, missing or empty sources prevent startup; passwords are not trimmed.
-
-## Verified Build
-
-**18 Java unit tests passed with no skips.** The release pipeline builds all six
-adapters, runs packaging/documentation checks and verifies jar contents, embedded
-versions and checksums. It does not start Cassandra, LDAP or systemd clusters.
+CI: 18 Java unit tests, packaging/docs checks and six adapter builds. CI does not start Cassandra,
+LDAP or systemd clusters; local E2E is separate, not verification of these CI-built bytes.
 Source: [`{commit[:12]}`]({base}/commit/{commit}).
 
-Cluster E2E tests run locally with `make integration-systemd`; their reports are
-not copied into this release or claimed as verification of these CI-built bytes.
-The local suite covers real systemd credentials, access changes and failure
-injection. TPM-bound encryption and production-specific wrappers require separate
-validation. See the [test guide]({base}/blob/{tag}/molecule/integration/README.md).
-
-## Installation and Safety
-
-Provision `ldap_auth` using the supplied schema, create mapped roles/keyspaces,
-install only the matching shaded jar, configure a bind-secret source in `ldap.yaml`,
-and roll nodes with native administrator access available.
-
-Read the [installation guide]({base}/blob/{tag}/README.adoc),
-[operations guide]({base}/blob/{tag}/ACCESS_SYNC.md) and
-[test scope]({base}/blob/{tag}/molecule/integration/README.md) before deployment.
-
-**Operational limits:** revocation is subject to reconciliation/cache delays;
-the global lock has no TTL and requires deliberate recovery after an abandoned
-owner, including restarts during synchronization. There is no automatic worker
-drain; use the documented maintenance protocol for planned restarts.
-The bind-DN Cassandra role is created as SUPERUSER. Disabled AD accounts
-need operator revocation for existing grants. Nested/primary AD groups are not
-expanded. OpenLDAP e2e is not validation of AD, LDAPS, multi-DC or production load.
-
-The 2.2 test image uses exact Cassandra 2.2.19 server binaries with native Java 8
-and JNA 4.2.2. Compatibility is established for the exact server releases above,
-not every patch release or upstream security support status; release CI does not
-repeat that cluster qualification.
+[Installation]({base}/blob/{tag}/README.adoc) |
+[Operations and limits]({base}/blob/{tag}/ACCESS_SYNC.md) |
+[Test scope]({base}/blob/{tag}/molecule/integration/README.md) |
+[Full changelog]({base}/blob/{tag}/CHANGELOG.md)
 '''
     install = f'''# Installing Cassandra LDAP {tag}
 
@@ -197,8 +157,10 @@ repeat that cluster qualification.
 6. Configure the correct authenticator, LDAPCassandraRoleManager and CassandraAuthorizer.
    Configure QUORUM auth writes on 4.1/5.0. Roll and verify nodes one at a time.
 
-The bind-DN Cassandra role is created as SUPERUSER. Review this security behavior
-before enabling LDAP logins. The example password is a placeholder, not a credential.
+The LDAP bind identity is not given a Cassandra role or SUPERUSER automatically.
+Existing roles are unchanged: review unnecessary bind-DN privileges explicitly
+while preserving an independent administrator. See the access review in ACCESS_SYNC.md
+on the source site below. The example password is a placeholder, not a credential.
 Use client TLS and LDAPS with trusted certificates. Never use public test passwords.
 
 Full installation: {base}/blob/{tag}/README.adoc
@@ -211,6 +173,7 @@ Verification scope: {base}/blob/{tag}/molecule/integration/README.md
                                       f']({base}/blob/{tag}/ACCESS_SYNC.md#planned-maintenance)')
     payload = {**files, 'conf/ldap.yaml': (root / 'conf/ldap.yaml').read_bytes(),
                'SECRET_HANDLING.md': secret_guide.encode(),
+               'CHANGELOG.md': source_links((root / 'CHANGELOG.md').read_text()).encode(),
                'conf/access-sync-schema.cql': (root / 'conf/access-sync-schema.cql').read_bytes(),
                'LICENSE': (root / 'LICENSE').read_bytes(), 'INSTALL.md': install.encode()}
     payload['SHA256SUMS'] = checksums(payload)

@@ -18,10 +18,8 @@
 package org.apache.cassandra.auth;
 
 import static com.instaclustr.cassandra.ldap.conf.LdapAuthenticatorConfiguration.CASSANDRA_LDAP_ADMIN_USER;
-import static com.instaclustr.cassandra.ldap.conf.LdapAuthenticatorConfiguration.CASSANDRA_LDAP_ADMIN_USER_SYSTEM_PROPERTY;
 import static com.instaclustr.cassandra.ldap.conf.LdapAuthenticatorConfiguration.CONSISTENCY_FOR_ROLE;
 import static com.instaclustr.cassandra.ldap.conf.LdapAuthenticatorConfiguration.DEFAULT_CONSISTENCY_FOR_ROLE;
-import static com.instaclustr.cassandra.ldap.conf.LdapAuthenticatorConfiguration.LDAP_DN;
 import static java.lang.String.format;
 
 import java.util.Properties;
@@ -83,9 +81,6 @@ public class LDAPCassandraRoleManager extends CassandraRoleManager
         final String dbaRole = properties.getProperty(CASSANDRA_LDAP_ADMIN_USER);
         logger.info("DB admin role is {}", dbaRole);
 
-        final String ldapAdminRole = properties.getProperty(LDAP_DN);
-        logger.info("LDAP admin role is {}", ldapAdminRole);
-
         try
         {
             final Callable<Void> roleManagerSetupCallable = () ->
@@ -102,7 +97,7 @@ public class LDAPCassandraRoleManager extends CassandraRoleManager
                     {
                         throw new IllegalStateException();
                     }
-                    logger.info("Role '" + dbaRole + "' can not log in, prematurely existing setup, not going to create LDAP admin role {}", ldapAdminRole);
+                    logger.info("Internal Cassandra role '{}' cannot log in; skipping LDAP role-manager setup.", dbaRole);
                     return null;
                 }
 
@@ -111,29 +106,6 @@ public class LDAPCassandraRoleManager extends CassandraRoleManager
                 clientState.login(new AuthenticatedUser(dbaRole));
 
                 systemAuthRoles.setClientState(clientState);
-
-                if (ldapAdminRole == null || ldapAdminRole.isEmpty())
-                {
-                    logger.info("Not trying to create LDAP admin role as it is not set in configuration via {} option.", LDAP_DN);
-                    return null;
-                }
-
-                try
-                {
-                    if (systemAuthRoles.roleMissing(ldapAdminRole))
-                    {
-                        systemAuthRoles.createRole(ldapAdminRole, true);
-                        logger.info("Created LDAP admin role '{}'", ldapAdminRole);
-                    } else
-                    {
-                        logger.info("Not creating LDAP admin role '{}' as it is already present.", ldapAdminRole);
-                    }
-                } catch (final Exception ex)
-                {
-                    logger.trace("Unable to create LDAP admin role.", ex);
-                    logger.error("Unable to create LDAP admin role {}", ldapAdminRole);
-                    throw ex;
-                }
 
                 return null;
             };

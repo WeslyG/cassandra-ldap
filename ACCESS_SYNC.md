@@ -18,9 +18,11 @@ and repair keyspaces after replication changes. The schema file creates tables,
 not the keyspace. Do not give LDAP-managed users write access to ldap_auth.
 Create mapped roles/keyspaces before enabling the plugin.
 
-The service bind DN is also used as the name of an automatically created
-Cassandra SUPERUSER role. Protect that directory identity and its password.
-Ordinary LDAP users get separate DN-named LOGIN=true, SUPERUSER=false roles
+The service bind identity needs directory-read access, not a Cassandra role.
+Startup neither creates nor elevates a Cassandra role named after the bind DN.
+Protect that directory identity and its password. Existing Cassandra roles are
+not deleted, demoted or otherwise changed by startup.
+Ordinary LDAP client users get DN-named LOGIN=true, SUPERUSER=false roles
 without native password hashes. Mapped permission-container roles are
 operator-created and may have LOGIN=false.
 
@@ -30,6 +32,41 @@ Do not add unsupported settings on 2.2, 3.0, 3.11 or 4.0. Those adapters execute
 Cassandra's validated native authorization statements, then repeat the relevant
 auth-table and index mutations at QUORUM before releasing the synchronization
 lock. Shared journal/assignment reads and writes use QUORUM on every adapter.
+
+## Bind Identity Access Review
+
+Keep LDAP reader credentials separate from deliberate Cassandra administrators.
+Before deployment, verify an independent native superuser connection. If the bind
+identity is also used for Cassandra administration, provision and verify its
+replacement before removing any privileges.
+
+Use that independent administrator to audit the actual DN-named role, including
+inherited roles and manually assigned permissions. For a synthetic example DN:
+
+```sql
+LIST ROLES OF "cn=ldap-reader,dc=example,dc=org";
+LIST ALL PERMISSIONS OF "cn=ldap-reader,dc=example,dc=org";
+ALTER ROLE "cn=ldap-reader,dc=example,dc=org" WITH SUPERUSER = false;
+```
+
+Run ALTER only if the audited role exists and its elevation is unnecessary.
+Inherited superuser memberships must be reviewed separately: SUPERUSER=false
+does not remove them. Revoking existing manual permissions or dropping the role
+also requires an explicit operator decision. If this is strictly a directory
+reader, LOGIN=false can prevent new Cassandra client logins without disabling
+LDAP bind. Do not disable the configured internal Cassandra actor or your only
+working administrator.
+
+Use the [maintenance protocol](#planned-maintenance) for planned restarts.
+Authorization caches can delay demotion for existing connections, and disabling
+LOGIN does not terminate an already authenticated session. Close affected client
+connections when the access review requires that guarantee.
+
+The plugin's internal mutation path is trusted in-process code, not a password-
+authenticated administrator connection. Its configured actor name is not a
+client-permission boundary: statements are validated and executed without the
+external-client authorization step. LDAP credential/group checks, safe query
+construction and reconciliation policy enforce the plugin's access contract.
 
 ## Journal and Ownership
 

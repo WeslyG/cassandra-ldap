@@ -98,6 +98,57 @@ The matrix hashes the jar before running and checks it again afterward.
 It records actual release versions from both servers, not just image tags.
 Do not rebuild a jar while its cluster test is running.
 
+## Bind-Role Privilege Experiment
+
+The local SUPERUSER experiment builds three sets of jars from its pinned Git
+baseline in an ignored source copy. Two explicit patches change only startup creation
+of the bind-DN Cassandra role: create it without SUPERUSER, or omit creation.
+Production Java sources and regular module artifacts remain untouched. Uncommitted
+Java changes are not included in these experimental builds. The default baseline
+is commit `9a12806cd87fd1a9ace03a2487a87f819dfd3e72`; EXPERIMENT_SOURCE_REF can
+select another compatible reference. This is not a build of the current production
+startup behavior.
+
+```sh
+bash scripts/build_superuser_experiment.sh
+LDAP_TEST_SYSTEMD=true bash molecule/integration/run.sh superuser
+```
+
+The builder refuses to overwrite an existing experimental source directory.
+Preserve or remove only that disposable directory before another build. Reports
+and artifacts are under `molecule/integration/.state/superuser-experiment/`.
+Do not run this experiment concurrently with another integration scenario.
+
+For a targeted run using existing experimental jars:
+
+```sh
+LDAP_TEST_SYSTEMD=true bash molecule/integration/run.sh superuser 4.1 --variants baseline demoted unprivileged absent
+```
+
+The default selection runs all four states on 4.1 and both changed-startup states
+on every other supported version. Each case creates fresh volumes, checks actual
+server versions, runs Molecule idempotence and all 15 access cases, preserves
+local evidence, verifies the jar hash and tears down the cluster. It does not run
+the separate secret-source suite; systemd mode uses the real service topology.
+
+The bind identity is an ordinary inetOrgPerson with explicit read-only LDAP ACLs,
+not the directory root DN. It belongs only to readers. Probes compare configured
+application access with reading an unmapped keyspace and creating another
+SUPERUSER. The demotion case also checks an already-open client session and
+rolling restarts. The omitted-startup case keeps the bind role absent throughout
+all 15 access cases, then verifies that a later service login creates only an
+ordinary user role.
+
+A separate probe temporarily selects the unprivileged service identity as the
+internal Cassandra DBA, records whether provisioning succeeds or fails, restores
+the native DBA and verifies recovery. This measures internal execution behavior;
+it does not assume Cassandra applies external-client authorization to trusted
+in-process statements. XML, JSON and raw logs remain local and are not release
+assets or CI evidence.
+
+See the [privilege experiment report](SUPERUSER_EXPERIMENT.md) for the measured
+boundaries and operational interpretation.
+
 ## Unit Tests
 
 `make test-unit` runs 18 TestNG tests using the 4.1 module as a classpath for
@@ -122,7 +173,7 @@ The Docker/Molecule scenario is the real-cluster acceptance path.
 `make check-docs` runs in the same runner without mounting the Docker socket.
 It checks README YAML against the example file, Java defaults, Maven/matrix
 versions, local documentation links, 18 unit annotations and collection of all
-15 access cases and 4/8 secret-source cases (plain/systemd mode), without opening
+3 bind-role regressions, 15 access cases and 4/8 secret-source cases (plain/systemd mode), without opening
 database or LDAP connections.
 
 ## Behavioral Tests
@@ -142,7 +193,13 @@ starts systemd. The actual Cassandra unit uses `LoadCredentialEncrypted=` and
 `PrivateMounts=yes`. No test injects a fake CREDENTIALS_DIRECTORY. Do not change
 host mount propagation or bind the host's credential store/cgroup tree into nodes.
 
-Before the 15 access tests, `test_secrets.py` runs 8 cases per version:
+First, `test_bind_role.py` runs 3 regressions per version: no bind-DN role after
+startup and ordinary user authentication, and preservation of existing roles
+(both SUPERUSER=false and true, LOGIN=false, with manual grants/membership) through
+rolling restarts. These are explicit operator-created fixtures, not automatic
+administrators. The tests remove their fixtures before subsequent suites.
+
+Before the 15 access tests, `test_secrets.py` then runs 8 cases per version:
 
 | Case | Count | Verification |
 |---|---:|---|
@@ -154,8 +211,8 @@ Before the 15 access tests, `test_secrets.py` runs 8 cases per version:
 
 All nodes then run the access lifecycle with the credential source. Reports
 include `secrets.xml`, `systemd.log` and `systemd_credentials` in summary JSON;
-zero failures/errors/skips are required. The full matrix has 90 access and 48
-secret-source checks. This verifies host-key encryption, not TPM binding, all
+zero failures/errors/skips are required. The full matrix has 18 bind-role, 90 access
+and 48 secret-source checks: 156 total. This verifies host-key encryption, not TPM binding, all
 Linux distributions or a production package's privilege-dropping wrappers.
 
 For a targeted systemd run without rebuilding artifacts:
@@ -166,7 +223,7 @@ LDAP_TEST_SYSTEMD=true bash molecule/integration/run.sh matrix 4.1
 
 For the ordinary upstream Docker entrypoint (without systemd), use
 `bash molecule/integration/run.sh matrix`. That mode runs 4 secret-source cases
-(inline, ENV, file, missing ENV) in addition to the same 15 access cases. It is
+(inline, ENV, file, missing ENV) in addition to the same 3 bind-role and 15 access cases. It is
 useful for debugging but does not validate real systemd credentials.
 
 Pytest collects 15 cases. The invalid-login test has four parameter combinations;
@@ -193,8 +250,8 @@ Unauthorized response, not merely a changed system_auth row. Other eventually
 checks also have explicit bounds. An already executing query is not cancelled.
 
 A passing local matrix version requires the full Molecule lifecycle, idempotence,
-15 access cases and 8 systemd secret-source cases, with no skipped tests. Six
-passing versions give 90 access and 48 secret-source checks.
+3 bind-role regressions, 15 access cases and 8 systemd secret-source cases, with no
+skipped tests. Six passing versions give 156 checks.
 The isolated topology verifies normal paths and injected failures, not a proof
 against every possible process/network failure ordering.
 

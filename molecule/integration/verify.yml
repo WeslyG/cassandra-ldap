@@ -3,6 +3,10 @@
   connection: local
   gather_facts: false
   tasks:
+    - name: Verify bind-role isolation and preservation of operator-created roles
+      ansible.builtin.command:
+        argv: ["{{ ansible_playbook_python }}", -m, pytest, -v, -s, "{{ playbook_dir }}/test_bind_role.py", "--junitxml={{ playbook_dir }}/.state/{{ lookup('env', 'CASSANDRA_VERSION') | default('current', true) }}-bind.xml"]
+      changed_when: false
     - name: Verify secret sources and real systemd credentials before access mutations
       ansible.builtin.command:
         argv: ["{{ ansible_playbook_python }}", -m, pytest, -v, -s, "{{ playbook_dir }}/test_secrets.py", "--junitxml={{ playbook_dir }}/.state/{{ lookup('env', 'CASSANDRA_VERSION') | default('current', true) }}-secrets.xml"]

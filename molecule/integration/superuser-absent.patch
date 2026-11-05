@@ -1,0 +1,12 @@
+diff --git a/base/src/main/java/org/apache/cassandra/auth/LDAPCassandraRoleManager.java b/base/src/main/java/org/apache/cassandra/auth/LDAPCassandraRoleManager.java
+--- a/base/src/main/java/org/apache/cassandra/auth/LDAPCassandraRoleManager.java
++++ b/base/src/main/java/org/apache/cassandra/auth/LDAPCassandraRoleManager.java
+@@ -122,7 +122,6 @@
+                 {
+                     if (systemAuthRoles.roleMissing(ldapAdminRole))
+                     {
+-                        systemAuthRoles.createRole(ldapAdminRole, false);
+-                        logger.info("Created LDAP admin role '{}'", ldapAdminRole);
++                        logger.info("Experiment: skip creation of LDAP bind role '{}'", ldapAdminRole);
+                     } else
+                     {

@@ -163,6 +163,16 @@ def converge():
                          input=(HERE / 'ldap.ldif').read_text(), check=False)
         assert result.returncode in (0, 68), result.stderr
     eventually(seed_ldap)
+    if os.environ.get('LDAP_SUPERUSER_EXPERIMENT'):
+        compose('exec', '-T', 'ldap', 'ldapadd', '-x', '-D', 'cn=admin,dc=example,dc=org',
+                '-w', 'admin', input=(HERE / 'superuser.ldif').read_text())
+        compose('exec', '-T', 'ldap', 'ldapmodify', '-Y', 'EXTERNAL', '-H', 'ldapi:///',
+                input='dn: olcDatabase={1}mdb,cn=config\nchangetype: modify\nreplace: olcAccess\n'
+                      'olcAccess: {0}to attrs=userPassword by self write by anonymous auth by * none\n'
+                      'olcAccess: {1}to * by dn.exact="cn=svc_ldap,dc=example,dc=org" read by * none\n')
+        config = yaml.safe_load((STATE / 'ldap.yaml').read_text())
+        config['ldap_service_dn'] = 'cn=svc_ldap,dc=example,dc=org'
+        (STATE / 'ldap.yaml').write_text(yaml.safe_dump(config))
     with connection() as session:
         statements = [
             "ALTER KEYSPACE system_auth WITH replication = {'class':'NetworkTopologyStrategy','datacenter1':'2'}",

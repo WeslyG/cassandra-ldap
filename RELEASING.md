@@ -8,7 +8,7 @@ adapters. Root/module versions, matrix artifact versions and the tag must agree.
 | Download | Purpose |
 |---|---|
 | Six cassandra-ldap-SERVER-VERSION.jar files | Individual shaded adapters; install only one on a node |
-| cassandra-ldap-VERSION.zip | All jars, YAML example, journal schema, secret guide, license, installation instructions and internal checksums |
+| cassandra-ldap-VERSION.zip | All jars, YAML example, journal schema, secret guide, changelog, license, installation instructions and internal checksums |
 | release-manifest.json | Source commit, exact built jar hashes and fast verification scope |
 | SHA256SUMS | SHA-256 for every jar, ZIP and manifest |
 
@@ -27,7 +27,8 @@ make integration-systemd
 
 Use a trusted Docker host and disposable credentials. The six versions run
 sequentially. Inspect actual node versions, jar hashes, 15 access cases and
-8 secret-source cases per version, idempotence and teardown; require no skips.
+8 secret-source cases and 3 bind-role regression cases per version, idempotence
+and teardown; require no skips. The full systemd matrix has 156 pytest cases.
 Reports remain ignored under molecule/integration/.state/reports/.
 
 A CI rebuild can produce different bytes from a local build. Local reports are
@@ -37,14 +38,16 @@ release build alone does not establish running-cluster correctness.
 
 ## Prepare and Publish
 
-1. Align versions and documentation, run appropriate local E2E and fast checks.
+1. Align versions and documentation, add the dated version entry to CHANGELOG.md,
+   and run appropriate local E2E and fast checks. Describe changes since the
+   preceding release and actionable upgrade requirements, not the full feature set.
 2. Commit the sources. Releases require a clean working tree.
 3. Create an annotated stable tag on that exact commit:
 
 ```sh
-git tag -a v1.3.0 -m "Cassandra LDAP Authenticator v1.3.0"
+git tag -a v1.4.0 -m "Cassandra LDAP Authenticator v1.4.0"
 git push origin master
-git push origin v1.3.0
+git push origin v1.4.0
 ```
 
 4. Follow the tag-triggered workflow through verification and publication. CI
@@ -58,11 +61,20 @@ For local preparation of a tagged download set:
 
 ```sh
 make verify-fast
-RELEASE_TAG=v1.3.0 make release-package
+RELEASE_TAG=v1.4.0 make release-package
 ```
 
-Output is ignored under dist/v1.3.0/. Existing output is not overwritten.
+Output is ignored under dist/v1.4.0/. Existing output is not overwritten.
 Never replace published artifacts or repoint a published release tag.
+
+## Changelog and Notes
+
+CHANGELOG.md is the source of version-specific release notes. Use one heading
+`## VERSION - YYYY-MM-DD` per release, with concise change bullets and any
+necessary upgrade actions. Packaging rejects missing, duplicate or empty entries
+and invalid dates. Only the selected version's section is used in GitHub notes;
+older entries stay in the complete bundled changelog. Release pages link to
+installation, operations and test scope instead of repeating those guides.
 
 ## Verification Gates
 
@@ -72,10 +84,11 @@ results, missing plugin classes and wrong embedded Maven versions. The 18 Java
 unit tests must run after jar packaging. Server dependencies such as Cassandra
 CQL classes, Guava and SnakeYAML must not be bundled.
 
-The 16 packaging unit tests use synthetic temporary repositories and jars. They
+The 21 packaging unit tests use synthetic temporary repositories and jars. They
 check public asset contents/checksums, readable output modes, version/tag/source
 guards, jar structure, unit reports, output overwrite protection and independence
-from local E2E reports. Local E2E state is neither read nor required by packaging.
+from local E2E reports, plus missing/duplicate/empty changelog entries and invalid
+dates. Local E2E state is neither read nor required by packaging.
 
 Five additional maintenance-helper unit tests verify exclusive reservation,
 lost CAS reply resolution, exception cleanup and refusal to clear another owner.

@@ -24,6 +24,9 @@ class ReleasePackagingTest(unittest.TestCase):
         self.write("SECRET_HANDLING.md", "# Secret sources\n[Tests](molecule/integration/README.md)\n")
         self.write("conf/access-sync-schema.cql", "-- Synthetic schema fixture\n")
         self.write("LICENSE", "Synthetic license fixture\n")
+        self.write("CHANGELOG.md", "# Changelog\n\n## 1.2.0 - 2026-11-05\n\n"
+                   "- Current fixture change. See [operations](ACCESS_SYNC.md#bind-identity-access-review).\n\n"
+                   "## 1.1.0 - 2026-01-01\n\n- Old fixture change.\n")
         self.matrix = {module: {"version": server, "plugin_version": "1.2.0"} for module, server in
                        [("2.2", "2.2.19"), ("3.0", "3.0.31"), ("3.11", "3.11.18"),
                         ("4.0", "4.0.16"), ("4.1", "4.1.10"), ("5.0", "5.0.6")]}
@@ -104,6 +107,7 @@ class ReleasePackagingTest(unittest.TestCase):
         with zipfile.ZipFile(target / "cassandra-ldap-1.2.0.zip") as bundle:
             prefix = "cassandra-ldap-1.2.0/"
             self.assertIn(prefix + "conf/ldap.yaml", bundle.namelist())
+            self.assertIn(prefix + "CHANGELOG.md", bundle.namelist())
             guide = bundle.read(prefix + "SECRET_HANDLING.md").decode()
             self.assertIn("/blob/v1.2.0/molecule/integration/README.md)", guide)
             self.assertNotIn("](molecule/", guide)
@@ -114,6 +118,40 @@ class ReleasePackagingTest(unittest.TestCase):
         notes = (target / "RELEASE_NOTES.md").read_text()
         self.assertIn("does not start Cassandra", notes)
         self.assertNotIn("15/15", notes)
+        self.assertIn("Current fixture change", notes)
+        self.assertNotIn("Old fixture change", notes)
+        self.assertNotIn("## Access Model", notes)
+        self.assertIn("/blob/v1.2.0/ACCESS_SYNC.md#bind-identity-access-review", notes)
+
+    def test_rejects_missing_changelog(self):
+        (self.root / 'CHANGELOG.md').unlink()
+        self.seal()
+        with self.assertRaises(FileNotFoundError):
+            prepare_release(self.root, 'v1.2.0')
+
+    def test_rejects_missing_release_entry(self):
+        self.write('CHANGELOG.md', '# Changelog\n\n## 1.1.0 - 2026-01-01\n\n- Old change.\n')
+        self.seal()
+        with self.assertRaisesRegex(ValueError, 'exactly one dated entry'):
+            prepare_release(self.root, 'v1.2.0')
+
+    def test_rejects_duplicate_release_entry(self):
+        self.write('CHANGELOG.md', '## 1.2.0 - 2026-11-05\n\n- One.\n\n## 1.2.0 - 2026-11-05\n\n- Two.\n')
+        self.seal()
+        with self.assertRaisesRegex(ValueError, 'exactly one dated entry'):
+            prepare_release(self.root, 'v1.2.0')
+
+    def test_rejects_empty_release_entry(self):
+        self.write('CHANGELOG.md', '## 1.2.0 - 2026-11-05\n\n## 1.1.0 - 2026-01-01\n\n- Old.\n')
+        self.seal()
+        with self.assertRaisesRegex(ValueError, 'must contain changes'):
+            prepare_release(self.root, 'v1.2.0')
+
+    def test_rejects_invalid_release_date(self):
+        self.write('CHANGELOG.md', '## 1.2.0 - 2026-13-05\n\n- Change.\n')
+        self.seal()
+        with self.assertRaises(ValueError):
+            prepare_release(self.root, 'v1.2.0')
 
     def test_ignores_local_e2e_reports(self):
         self.write("molecule/integration/.state/reports/summary.json", "invalid JSON is deliberately ignored")

@@ -43,8 +43,9 @@ with both 1.x and 2.x. Do not shade Cassandra, Guava or another YAML runtime.
   grants, revoke stale owned entries before additions, and fail the login on errors.
 - Preserve manual assignments; never adopt existing grants silently.
 - Keep mapped roles/keyspaces operator-created. Ordinary LDAP roles are LOGIN=true
-  and SUPERUSER=false. The bind-DN superuser creation is security-sensitive and
-  must remain explicit in documentation.
+  and SUPERUSER=false. Never create or elevate a Cassandra role for the directory
+  bind identity at startup. Preserve existing roles and require explicit operator
+  review of unnecessary privileges; do not silently demote an administrator.
 - Do not add a TTL to the global lock or clear a live owner's lock. Recovery must
   stop uncertain writers and use a conditional owner update.
 - Require consistent policy fingerprints across nodes; preserve safe transitions.
@@ -81,7 +82,8 @@ Cluster E2E is local-only. Never add it to GitHub Actions or CircleCI; CI uses
 `make verify-fast` without a Docker socket in check containers. For runtime/shared-code
 changes run the full six-version matrix locally. For a version-only
 adapter change run at least its real-cluster scenario plus unit tests, and explain
-what was not rerun. Require idempotence, 15/15 access and 8/8 systemd secret cases,
+what was not rerun. Require idempotence, 15/15 access, 3/3 bind-role regressions
+and 8/8 systemd secret cases,
 zero skips, both actual server
 versions and matching jar hashes. Selective reruns preserve other summaries:
 check artifact hashes instead of treating the aggregate as one fresh invocation.
@@ -100,6 +102,13 @@ to make a test pass. The plugin has no automatic graceful worker drain; document
 the production restart/lock-recovery limitation separately from test coordination.
 
 Clusters share a fixed project/network/runner name and must run sequentially.
+The local bind-role privilege experiment uses `scripts/build_superuser_experiment.sh`
+and `run.sh superuser`. It builds patched snapshots of its pinned comparative
+baseline into ignored state,
+not regular module targets. Never publish these experimental jars. Keep its
+privilege probes separate from the normal 3-bind/15-access/8-secret acceptance counts;
+record internal DBA behavior rather than assuming trusted statements enforce
+external-client authorization. Do not run it alongside the normal matrix.
 Seed auth RF=2 precedes node 2 joining; perform full repair before enabling the
 plugin. Readiness includes native role mutations. Restarts must be rolling.
 Permission-cache tests must wait for an actual Unauthorized response. Remember
@@ -135,6 +144,9 @@ by assumption. Never commit an unrelated user's change without inspecting it.
 ## Releases
 
 Keep all Maven and matrix artifact versions aligned with the stable release tag.
+Maintain a dated CHANGELOG.md entry per version; release notes are generated from
+that entry, not a repeated product overview. Put migrations in the version entry
+and keep installation/operations documentation focused on current behavior.
 Run appropriate E2E locally and investigate failures. Release CI builds all jars
 and runs only unit, packaging and documentation checks. Packaging requires a clean
 tagged source, correct jar structure/versions and a passing fresh Java unit report;
